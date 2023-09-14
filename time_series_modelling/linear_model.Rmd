@@ -1,0 +1,32 @@
+# Library
+
+```{r}
+library(tidyverse)
+library(feasts)
+library(tsibble)
+```
+
+# Data ingestion
+```{r}
+incidence_df <- read_csv("../incidence_2000_2022_weekly.csv") %>% as_tsibble(index = date_admitted)
+incidence_df
+```
+
+# Time series analysis
+```{r}
+plot(incidence_df$date_admitted, incidence_df$n, type = "l")
+```
+
+```{r}
+incidence_2019 %>%
+  model(
+    classical_decomposition(n, type = "additive")
+  ) %>%
+  components() %>%
+  autoplot()
+```
+
+
+```{r}
+tseries::adf.test(incidence_df$n)
+```
