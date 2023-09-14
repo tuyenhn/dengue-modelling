@@ -1,0 +1,340 @@
+# Library imports
+
+```{r message=FALSE}
+library(tidyverse)
+library(fable)
+library(lubridate)
+library(tsibble)
+library(feasts)
+library(tscount)
+library(deSolve)
+library(stars)
+library(sf)
+```
+
+# Data ingest
+
+## Incidence data
+```{r}
+# incidence_ts_in <- read_csv("incidence_ts_in.csv", show_col_types = FALSE)
+# incidence_ts_in
+```
+
+```{r}
+# incidence_agg_in <- incidence_ts_in %>%
+#   rowid_to_column("ID") %>%
+#   as_tsibble(key = ID, index = date_admitted) %>%
+#   mutate(date_admitted = yearweek(date_admitted)) %>%
+#   index_by(date_admitted) %>%
+#   summarise(n = sum(n)) %>%
+#   mutate(year = year(date_admitted))
+# incidence_agg_in
+```
+
+```{r fig.height=5, fig.width=10}
+# incidence_agg_in %>%
+#   ggplot() +
+#   geom_line(aes(x = date_admitted, y = n)) +
+#   scale_x_yearmonth(date_breaks = "1 year", date_labels = "%Y")
+```
+
+```{r}
+# incidence_2019 <- incidence_agg_in %>% filter(year == 2019)
+# incidence_2019
+```
+
+```{r}
+# ggplot(incidence_2019) +
+#   geom_line(aes(x = date_admitted, y = n))
+```
+
+## HCMC shape
+
+```{r}
+hcmc_shp <- read_rds("../gadm41_VNM_1_pk.rds") %>%
+  terra::unwrap() %>%
+  st_as_sf() %>%
+  filter(GID_1 == "VNM.25_1")
+
+hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
+```
+
+## Population density
+
+```{r}
+vnm_pd_2019 <- read_stars("C:/Users/tuyenhn/Documents/dart/sociodemographic data/worldpop_pop_dense/vnm_pd_2019_1km_UNadj.tif")
+
+hcmc_pd_2019 <- st_crop(vnm_pd_2019, hcmc_shp)
+
+hcmc_pd_2019 <- mean(na.omit(as.vector(hcmc_pd_2019$vnm_pd_2019_1km_UNadj.tif)))
+hcmc_pd_2019
+```
+
+## Temperature and Precipitation
+```{r}
+vnm_weather_2019 <- read_stars("C:/Users/tuyenhn/Documents/dart/meteorological data/era5/all-variables_2019_daily_VNM.nc") %>%
+  st_set_crs(4326)
+
+hcmc_temp_2019 <- vnm_weather_2019 %>%
+  aggregate(hcmc_shp_w_buff, FUN = mean) %>%
+  pull(t2m) %>%
+  as.vector() - 273.15
+
+
+hcmc_precip_2019 <- vnm_weather_2019 %>%
+  aggregate(hcmc_shp_w_buff, FUN = sum) %>%
+  pull(tp) %>%
+  as.vector() * 1000
+
+
+hcmc_temp_2019 %>%
+  as_tibble() %>%
+  mutate(
+    precip = hcmc_precip_2019,
+    day = seq(1, 365)
+  ) %>%
+  pivot_longer(-day) %>%
+  ggplot() +
+  geom_line(aes(x = day, y = value, color = name))
+
+
+get_temp <- function(time) {
+  yout <- approx(hcmc_temp_2019, xout = time)$y
+  yout[is.na(yout)] <- mean(hcmc_temp_2019)
+  yout
+}
+
+get_precip <- function(time) {
+  yout <- approx(hcmc_precip_2019, xout = time)$y
+  yout[is.na(yout)] <- mean(hcmc_precip_2019)
+  yout
+}
+```
+
+
+# ODE model
+
+![](https://ars.els-cdn.com/content/image/1-s2.0-S0307904X22005054-gr1_lrg.jpg)
+
+## The parameters
+
+### Extension with human population density
+```{r}
+blood_meal_factor <- function(pop_dense) {
+  p1 <- 800 # person/km2, half-saturation constant *
+
+  pop_dense / (pop_dense + p1)
+}
+
+# *: half-saturation constant measured as the minimum human population density within the flying distance of Aedes mosquitoes
+```
+
+
+### Extension with temperature
+```{r}
+# Temperate-dependent parameters' polynomial coefficients
+poly_coefs <- list(
+  phi = c(-1.51e-4, 1.02e-2, -2.12e-1, 1.80, -5.40),
+  mu2 = c(7.50e-6, -7.53e-4, 2.13e-2, -4.19e-1, 2.32),
+  mu3 = c(4.39e-7, 7.06e-4, -3.25e-2, 4.25e-1),
+  mum = c(3.81e-6, -3.41e-4, 1.12e-2, -1.59e-1, 8.69e-1),
+  r2 = c(1.5e-9, -2.62e-7, 1.79e-5, -6.46e-4, 1.31e-2, -1.46e-1, 8.29e-1, -1.84),
+  r3 = c(1.0e-9, -1.9e-7, 1.41e-5, -5.89e-4, 1.47e-2, -2.24e-1, 2.05, -10.31, 21.90)
+)
+
+poly_rate <- function(temp, par_name) {
+  coefs <- poly_coefs[[par_name]]
+  degree <- seq(length(coefs) - 1, 0)
+
+  sapply(temp, function(x) sum(coefs * x^degree))
+}
+
+# Linear rates
+recruitment_rate <- function(pop_dense, temp) {
+  A0 <- 1.5 * pop_dense # prefactor of egg recruitment rate
+  phi <- poly_rate(temp, "phi") # /day, oviposition rate per female mosquito
+  h <- blood_meal_factor(pop_dense)
+
+  A0 * phi * h
+}
+
+biting_rate <- function(temp) {
+  0.5 * (0.0043 * temp + 0.0943)
+}
+
+transmission_prop_m2h <- function(temp) {
+  if (temp < 12.4) {
+    return(0)
+  } else if (temp >= 12.4 && temp <= 26.1) {
+    return(0.0729 * temp - 0.9037)
+  } else {
+    return(1)
+  }
+}
+
+transmission_prop_h2m <- function(temp) {
+  if (temp <= 12.286 || temp >= 32.461) {
+    return(0)
+  } else {
+    return(0.001044 * temp * (temp - 12.286) * sqrt(32.461 - temp))
+  }
+}
+```
+
+### Extension with precipitation
+```{r}
+q0 <- 0.2 # mm, amount of rain to allow 50% of eggs hatching
+q1 <- 0.02 # /mm, the capacity of eggs hatching with rain
+q2 <- 0.037 # hatching fraction from rain-independent sites
+
+egg_hatch_rate <- function(precip) {
+  (q1 * precip) / (q0 + q1 * precip) + q2
+}
+
+mula <- 3 # /mm, prefactor of precipitation induced mortality for larvae
+mupa <- 3 # /mm, prefactor of precipitation induced mortality for pupae
+wc <- 30 # mm, critical rain volume to cause additional mortality
+
+larvae_mortality_rate <- function(temp, precip) {
+  poly_rate(temp, "mu2") * (1 + mula * (precip - wc) * ifelse((precip - wc) >= 0, 1, 0))
+}
+
+pupae_mortality_rate <- function(temp, precip) {
+  poly_rate(temp, "mu3") * (1 + mupa * (precip - wc) * ifelse((precip - wc) >= 0, 1, 0))
+}
+```
+
+
+## The differential equations
+```{r}
+transmission_model <- function(time, variables, parameters) {
+  with(as.list(c(variables, parameters)), {
+    pop_dense <- hcmc_pd_2019
+
+    temp <- get_temp(time)
+    precip <- get_precip(time)
+
+    # print(time)
+
+    A <- recruitment_rate(pop_dense, temp)
+    a <- biting_rate(temp)
+    bm <- transmission_prop_m2h(temp)
+    bh <- transmission_prop_h2m(temp)
+    r1 <- egg_hatch_rate(precip)
+    r2 <- poly_rate(temp, "r2")
+    r3 <- poly_rate(temp, "r3")
+    mu2 <- larvae_mortality_rate(temp, precip)
+    mu3 <- pupae_mortality_rate(temp, precip)
+    mum <- poly_rate(temp, "mum")
+
+
+    # print(A)
+
+
+    dEg <- A - r1 * Eg - mu1 * Eg
+    dLa <- r1 * Eg - r2 * La - mu2 * La
+    dPu <- r2 * La - r3 * Pu - mu3 * Pu
+
+    dSm <- r3 * Pu - (a * bm * Ih / Nh) * Sm - mum * Sm
+    dEm <- (a * bm * Ih / Nh) * Sm - nm * Em - mum * Em
+    dIm <- nm * Em - mum * Im
+
+    dSh <- kh * Nh - (a * bh * Im / Nh) * Sh - muh * Sh
+    dEh <- (a * bh * Im / Nh) * Sh - nh * Eh - muh * Eh
+    dIh <- nh * Eh - gammah * Ih - muh * Ih
+    dRh <- gammah * Ih - muh * Rh
+
+    return(list(c(dEg, dLa, dPu, dSm, dEm, dIm, dSh, dEh, dIh, dRh)))
+  })
+}
+```
+
+
+```{r}
+parameters <- c(
+  nm = 0.05, # /day, per-capita extrinsic incubation rate
+  nh = 0.1428, # /day, per-capita intrinsic incubation rate
+  gammah = 0.1428, # /day, per-capita human recovery rate
+  muh = 0.000038, # /day, human death rate
+  mu1 = 0.05, # /day, minimal mortality rate for eggs
+  ##################
+  kh = 0.000038, # /day, human birth rate (assume same as human death rate)
+  Nh = hcmc_pd_2019 # total human population density
+)
+
+init_vars <- c(
+  Eg = 10000,
+  La = 0,
+  Pu = 0,
+  Sm = 0,
+  Em = 0,
+  Im = 0,
+  Sh = 10000000,
+  Eh = 0,
+  Ih = 0,
+  Rh = 0
+)
+
+time_values <- seq(1, 365, 0.01)
+
+ode_model <- ode(
+  y = init_vars,
+  times = time_values,
+  func = transmission_model,
+  parms = parameters,
+  rtol = 1e-7,
+  atol = 1e-7
+)
+```
+
+
+
+## The simulation results
+
+```{r}
+ode_model %>%
+  as_tibble() %>%
+  select(time, Sh, Eh, Ih, Rh) %>%
+  pivot_longer(-time) %>%
+  ggplot(aes(x = time)) +
+  geom_line(aes(y = value, color = name))
+```
+
+
+```{r}
+ode_model %>%
+  as_tibble() %>%
+  select(time, Eg, La, Pu) %>%
+  pivot_longer(-time) %>%
+  ggplot(aes(x = time)) +
+  geom_line(aes(y = value, color = name))
+```
+
+
+```{r}
+ode_model %>%
+  as_tibble() %>%
+  select(time, Sm, Em, Im) %>%
+  pivot_longer(-time) %>%
+  ggplot(aes(x = time)) +
+  geom_line(aes(y = value, color = name))
+```
+
+
+```{r}
+tibble(
+  temp = seq(0, 40, 0.1),
+  # time = seq(1, 365, 0.01),
+  # temp = get_temp(time),
+  # precip = get_precip(time),
+  # mu1 = 0.05,
+  # r1 = egg_hatch_rate(precip),
+  # r2 = poly_rate(temp, "r2"),
+  r3 = poly_rate(temp, "r3")
+  # recruitment = recruitment_rate(hcmc_pd_2019, temp) / 1000,
+  # phi = poly_rate(temp, "phi")
+) %>%
+  pivot_longer(-c(temp)) %>%
+  ggplot() +
+  geom_line(aes(x = temp, y = value, color = name))
+```

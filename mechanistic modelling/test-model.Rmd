@@ -1,0 +1,100 @@
+```{r}
+library(deSolve)
+library(tidyverse)
+library(magrittr)
+```
+
+```{r}
+transmission_model <- function(time, variables, parameters) {
+  with(as.list(c(variables, parameters)), {
+    dSh <- muh * Nh - (betah * b / Nh) * Sh * Iv - muh * Sh
+    dEh <- (betah * b / Nh) * Sh * Iv - (nh + muh) * Eh
+    dIh <- nh * Eh - (gammah + muh) * Ih
+    dRh <- gammah * Ih - muh * Rh
+
+    dSv <- A - (betav * b / Nh) * Ih * Sv - muv * Sv
+    dEv <- (betav * b / Nh) * Ih * Sv - (nv + muv) * Ev
+    dIv <- nv * Ev - muv * Iv
+
+    return(list(c(dSh, dEh, dIh, dRh, dSv, dEv, dIv)))
+  })
+}
+```
+
+
+```{r}
+run_model <- function(pop_size) {
+  init_pop_size <- pop_size
+  mosq_init_pop_size <- 1.5 * init_pop_size
+
+  time <- seq(0, 30, 0.01)
+
+  Nh <- init_pop_size
+  init_vars <- c(
+    Sh = init_pop_size - (2 / init_pop_size),
+    Eh = 1 / init_pop_size,
+    Ih = 1 / init_pop_size,
+    Rh = 0,
+    Sv = mosq_init_pop_size / 3,
+    Ev = mosq_init_pop_size / 3,
+    Iv = mosq_init_pop_size / 3
+  )
+
+  pars <- c(
+    Nh = Nh,
+    muh = 1 / 70,
+    A = 1000,
+    muv = 1 / 27,
+    gammah = 1 / 8,
+    b = 0.65,
+    betah = 0.425,
+    betav = 0.75,
+    nh = 1 / 6, # IIP
+    nv = 1 / 6.5 # EIP (at 30C)
+  )
+
+  model <- ode(init_vars, time, transmission_model, pars)
+
+  model
+}
+
+model <- run_model(10000)
+```
+
+
+```{r fig.height=5, fig.width=9}
+model_tibble <- model %>%
+  as_tibble() %>%
+  pivot_longer(-c(time))
+
+ggplot(mapping = aes(x = time)) +
+  geom_line(
+    data = model_tibble %>% filter(name %in% c("Sh", "Eh", "Ih", "Rh")),
+    mapping = aes(y = value, color = name)
+  ) +
+  geom_line(
+    data = model_tibble %>% filter(name %in% c("Sv", "Ev", "Iv")),
+    mapping = aes(y = value, color = name, linetype = "mosq"),
+  ) +
+  scale_x_continuous("Days") +
+  scale_y_continuous(
+    "Number of humans",
+    sec.axis = sec_axis(
+      trans = ~ . * 1,
+      name = "Number of mosq.",
+      breaks = seq(0, 15000, 5000)
+    )
+  ) +
+  scale_linetype_manual("type", values = c("mosq" = 2))
+```
+
+```{r}
+# final_epi_size_tibble <- map(
+#   10^seq(1, 7),
+#   \(x) tibble(psize = x, epi_size = sum(run_model(x)[, "Ih"]))
+# ) %>% list_c()
+#
+#
+# final_epi_size_tibble %>% ggplot() +
+#   geom_line(aes(x = psize, y = epi_size))
+```

@@ -1,0 +1,97 @@
+# Library imports
+
+```{r message=FALSE}
+library(tidyverse)
+library(fable)
+library(lubridate)
+library(tsibble)
+library(feasts)
+library(tscount)
+library(deSolve)
+library(stars)
+library(sf)
+```
+
+# Data ingest
+## HCMC shape
+
+```{r}
+hcmc_shp <- read_rds("gadm41_VNM_1_pk.rds") %>%
+  terra::unwrap() %>%
+  st_as_sf() %>%
+  filter(GID_1 == "VNM.25_1")
+
+hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
+```
+
+## Temperature and Precipitation
+```{r}
+vnm_weather_2019 <- read_stars("C:/Users/tuyenhn/Documents/dart/meteorological data/era5/all-variables_2019_daily_VNM.nc") %>%
+  st_set_crs(4326)
+
+hcmc_temp_2019 <- vnm_weather_2019 %>%
+  aggregate(hcmc_shp_w_buff, FUN = mean) %>%
+  pull(t2m) %>%
+  as.vector() - 273.15
+
+
+hcmc_precip_2019 <- vnm_weather_2019 %>%
+  aggregate(hcmc_shp_w_buff, FUN = sum) %>%
+  pull(tp) %>%
+  as.vector() * 1000
+
+
+hcmc_temp_2019 %>%
+  as_tibble() %>%
+  mutate(
+    precip = hcmc_precip_2019,
+    day = seq(1, 365)
+  ) %>%
+  pivot_longer(-day) %>%
+  ggplot() +
+  geom_line(aes(x = day, y = value, color = name))
+
+
+get_temp <- function(time) {
+  yout <- approx(hcmc_temp_2019, xout = time)$y
+  yout[is.na(yout)] <- mean(hcmc_temp_2019)
+  yout
+}
+
+get_precip <- function(time) {
+  yout <- approx(hcmc_precip_2019, xout = time)$y
+  yout[is.na(yout)] <- mean(hcmc_precip_2019)
+  yout
+}
+```
+
+# ODE Model
+
+```{r}
+transmission_model <- function(time, variables, parameters) {
+  with(as.list(c(variables, parameters)), {
+    dEvu <- ne * fag * (As + Ae) + ne * fag * (1 - p) * Ai - fE * Evu - muE * Evu
+    dLvu <- fE * Evu - fL * Lvu - mL * Lvu
+    dPvu <- fL * Lvu - fP * Pvu - mP * Pvu
+    dAeu <- xi * exp(-muem * (1 + (Pvu + Pvi) / LReal)) * fP * Pvu - (1 / gammaaem) * Aeu - mA * Aeu
+    dAs <- (1 / gammaaem) * Aeu - b * alphahv * (Hi / N) * As - mA * As
+
+    dEvi <- rho * ne * fag * Ai - fE * Evi - sigma * muE * Evi
+    dLvi <- fE * Evi - fL * Lvi - sigma * mL * Lvi
+    dPvi <- fL * Lvi - fP * Pvi - sigma * mP * Pvi
+    dAei <- xi * exp(-muem * (1 + (Pvu + Pvi) / LReal)) * fP * Pvi - (1 / gammaaem) * Aei - sigma * mA * Aei
+    dAi <- (1 / gammaaem) * Aei + fexv * Ae - sigma * mA * Ai
+
+    dAe <- b * alphahv * (Hi / N) * As - fexv * Ae - mA * Ae
+
+    dHs <- alphaH * N - b * alphavh * (Ai / N) * Hs - muH * Hs
+    dHe <- b * alphavh * (Ai / N) * Hs - (1 / tauexh) * He - muH * He
+    dHi <- (1 / tauexh) * He - (1 / tauih) * Hi - muH * Hi
+    dHr <- (1 / tauih) * Hi - muH * Hr
+
+    N <- Hs + He + Hi + Hr
+  })
+}
+
+parameters <- c()
+```
