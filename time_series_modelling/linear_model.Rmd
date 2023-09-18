@@ -1,32 +1,114 @@
 # Library
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 library(tidyverse)
+library(magrittr)
 library(feasts)
 library(tsibble)
+library(fpp3)
 ```
 
 # Data ingestion
 ```{r}
-incidence_df <- read_csv("../incidence_2000_2022_weekly.csv") %>% as_tsibble(index = date_admitted)
+incidence_df <- read_csv("../incidence_ts_in.csv", show_col_types = FALSE) %>%
+  mutate(date_admitted = as.Date(date_admitted)) %>%
+  filter(year(date_admitted) < 2020) %>%
+  as_tsibble(index = date_admitted)
+
+incidence_df %<>% fill_gaps(n = 0) %>%
+  index_by(agg = ~ yearmonth(.)) %>%
+  summarise(n = sum(n)) %>%
+  rename(date_admitted = agg)
+
 incidence_df
 ```
 
 # Time series analysis
 ```{r}
-plot(incidence_df$date_admitted, incidence_df$n, type = "l")
+ggplot(incidence_df, aes(x = date_admitted, y = n)) +
+  geom_line()
 ```
 
+
+## Unit root test
+"One way to determine more objectively whether differencing is required is to use a unit root test. These are statistical hypothesis tests of stationarity that are designed for determining whether differencing is required." - Hyndman, R.J., & Athanasopoulos, G. (2021) 
+One of the many unit root test is called KPSS (Kwiatkowski-Phillips-Schmidt-Shin) test, Kwiatkowski, D., Phillips, P. C. B., Schmidt, P., & Shin, Y. (1992). For this test, the null hypothesis is stationarity, i.e. smaller p-value suggests the time series is non-stationary and differencing is required.
 ```{r}
-incidence_2019 %>%
+incidence_df %>% features(n, unitroot_kpss)
+incidence_df %>%
+  mutate(n = difference(n)) %>%
+  features(n, unitroot_kpss)
+
+# number of differencing needed
+incidence_df %>% features(n, unitroot_ndiffs)
+```
+
+
+## Classical additive decomposition
+```{r}
+decomped <- incidence_df %>%
   model(
-    classical_decomposition(n, type = "additive")
+    classic_add = classical_decomposition(n, type = "additive")
   ) %>%
-  components() %>%
-  autoplot()
+  components()
+
+decomped %>% autoplot()
 ```
 
+## Trend-cycle
+```{r}
+decomped %>%
+  as_tsibble() %>%
+  autoplot(n, colour = "gray") +
+  geom_line(aes(y = trend), color = "red")
+```
+
+## Seasonally adjusted
+Remove the seasonality from the time series, i.e. dengue is not a seasonal epidemic.
 
 ```{r}
-tseries::adf.test(incidence_df$n)
+decomped %>%
+  as_tsibble() %>%
+  autoplot(n, colour = "gray") +
+  geom_line(aes(y = season_adjust), colour = "#0072B2")
+```
+
+```{r}
+incidence_df %>%
+  gg_tsdisplay(
+    difference(n, 12),
+    plot_type = "partial",
+    lag = 36
+  )
+```
+
+## Model fitting
+
+```{r}
+fit <- incidence_df %>%
+  filter(year(date_admitted) < 2019) %>%
+  model(
+    auto_arima = ARIMA(n, stepwise = FALSE, approx = FALSE)
+  )
+```
+
+```{r}
+fit %>% pivot_longer(everything(),
+  names_to = "Model name",
+  values_to = "Orders"
+)
+
+fit %>%
+  select(auto_arima) %>%
+  gg_tsresiduals(lag = 36)
+
+augment(fit) %>%
+  filter(.model == "auto_arima") %>%
+  features(.innov, ljung_box, lag = 12, dof = 4)
+```
+
+```{r}
+forecast(fit, h = 12) |>
+  filter(.model == "auto_arima") |>
+  autoplot(incidence_df)
 ```
