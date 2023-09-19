@@ -12,7 +12,7 @@ library(fpp3)
 ```{r}
 incidence_df <- read_csv("../incidence_ts_in.csv", show_col_types = FALSE) %>%
   mutate(date_admitted = as.Date(date_admitted)) %>%
-  filter(year(date_admitted) < 2020) %>%
+  filter(year(date_admitted) < 2019) %>%
   as_tsibble(index = date_admitted)
 
 incidence_df %<>% fill_gaps(n = 0) %>%
@@ -20,13 +20,53 @@ incidence_df %<>% fill_gaps(n = 0) %>%
   summarise(n = sum(n)) %>%
   rename(date_admitted = agg)
 
+incidence_df_weekly <- read_csv("../incidence_ts_in.csv", show_col_types = FALSE) %>%
+  mutate(date_admitted = as.Date(date_admitted)) %>%
+  as_tsibble(index = date_admitted) %>%
+  fill_gaps(n = 0) %>%
+  index_by(agg = ~ yearweek(.)) %>%
+  summarise(n = sum(n)) %>%
+  rename(date_admitted = agg) %>%
+  mutate(n = log(n))
+
 incidence_df
 ```
 
 # Time series analysis
+Since starts of epidemics have an exponential growth rate, we apply a logarithmic transformation to the time series.
 ```{r}
 ggplot(incidence_df, aes(x = date_admitted, y = n)) +
   geom_line()
+
+ggplot(incidence_df, aes(x = date_admitted, y = log(n))) +
+  geom_line()
+```
+We can check if we're correct using by checking Box-Cox transformations log-likelihood along lambda from range -2 to 2, along with the Shapiro-Wilk normality test (higher p-value means cannot reject null hypothesis of normal distribution).
+## Box-cox transformation
+```{r}
+boxcox_mle <- unclass(MASS::boxcox(lm(incidence_df$n ~ 1))) %>% as_tibble()
+
+map(boxcox_mle$x, \(lambda) {
+  tibble(
+    lambda = lambda,
+    transformed_x = list(box_cox(incidence_df$n, lambda)),
+    normal_pvalue = shapiro.test(unlist(transformed_x))$p.value
+  )
+}) %>%
+  list_c() %>%
+  left_join(boxcox_mle, by = c("lambda" = "x")) %>%
+  ggplot(aes(x = lambda)) +
+  geom_line(aes(y = normal_pvalue), color = "red") +
+  geom_line(aes(y = (y - min(y)) / 25000), color = "blue") +
+  scale_y_continuous(
+    "Normality test p-value",
+    sec.axis = sec_axis(trans = ~ . * 25000 + min(boxcox_mle$y), name = "log-Likelihood")
+  )
+```
+
+With the confirmation from the Box-Cox transformations and normality test, we apply logarithmic transformation on the data.
+```{r}
+incidence_df %<>% mutate(n = log(n))
 ```
 
 
@@ -42,6 +82,7 @@ incidence_df %>%
 # number of differencing needed
 incidence_df %>% features(n, unitroot_ndiffs)
 ```
+This means, at most, 1 differencing is required.
 
 
 ## Classical additive decomposition
@@ -73,6 +114,9 @@ decomped %>%
   geom_line(aes(y = season_adjust), colour = "#0072B2")
 ```
 
+# Model fitting
+## (S)ARIMA
+
 ```{r}
 incidence_df %>%
   gg_tsdisplay(
@@ -82,33 +126,76 @@ incidence_df %>%
   )
 ```
 
-## Model fitting
-
 ```{r}
 fit <- incidence_df %>%
   filter(year(date_admitted) < 2019) %>%
   model(
-    auto_arima = ARIMA(n, stepwise = FALSE, approx = FALSE)
+    auto_arima = ARIMA(n ~ pdq(1, 0, 0) + PDQ(0, 1, 1)),
+
+    # no seasonal component, AR(1) because of spike at lag-1 in PACF, 1 differencing
+    arima110_000 = ARIMA(n ~ pdq(1, 1, 0) + PDQ(0, 0, 0)),
+
+    # AR(1) because of spike at lag-1 of every start of season. 1 seasonal differencing, no seasonal AR.
+    arima100_010 = ARIMA(n ~ pdq(1, 0, 0) + PDQ(0, 1, 0)),
   )
 ```
 
+
+# Model selection & evaluation
+* AIC lower is better (less information loss)
 ```{r}
-fit %>% pivot_longer(everything(),
+report(fit)
+
+# ARIMA(1,0,0)(0,1,1)[12] hasl lowest AIC(c)
+fit %>% pivot_longer(
+  everything(),
   names_to = "Model name",
   values_to = "Orders"
 )
 
+fit %<>% select(auto_arima)
+
 fit %>%
-  select(auto_arima) %>%
   gg_tsresiduals(lag = 36)
 
+# Ljung-Box test, higher means cannot reject null hypothesis of independently distributed data
 augment(fit) %>%
-  filter(.model == "auto_arima") %>%
   features(.innov, ljung_box, lag = 12, dof = 4)
 ```
 
+## Residual against predictor
 ```{r}
-forecast(fit, h = 12) |>
-  filter(.model == "auto_arima") |>
-  autoplot(incidence_df)
+incidence_df %>%
+  as_tibble() %>%
+  left_join(residuals(fit), by = "date_admitted") %>%
+  pivot_longer(n) %>%
+  ggplot(aes(x = value, y = .resid)) +
+  geom_point()
+```
+
+## Residual against fitted
+```{r}
+augment(fit) %>%
+  ggplot(aes(x = .fitted, y = .resid)) +
+  geom_point()
+```
+
+
+# Forecasting
+```{r}
+incidence_df_full <- read_csv("../incidence_ts_in.csv", show_col_types = FALSE) %>%
+  mutate(date_admitted = as.Date(date_admitted)) %>%
+  as_tsibble(index = date_admitted) %>%
+  fill_gaps(n = 0) %>%
+  index_by(agg = ~ yearmonth(.)) %>%
+  summarise(n = sum(n)) %>%
+  rename(date_admitted = agg) %>%
+  mutate(n = log(n))
+```
+
+
+```{r}
+forecast(fit, h = 48) %>%
+  filter(.model == "auto_arima") %>%
+  autoplot(incidence_df_full)
 ```
