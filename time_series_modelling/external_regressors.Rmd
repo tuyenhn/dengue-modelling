@@ -1,0 +1,136 @@
+# Library
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(magrittr)
+library(feasts)
+library(tsibble)
+library(fpp3)
+library(fable.prophet)
+library(sf)
+library(stars)
+```
+
+# Data ingestion
+
+## Incidence data
+
+```{r}
+incidence_raw <- read_csv("../incidence_ts_in.csv", show_col_types = FALSE) %>%
+  mutate(date_admitted = as.Date(date_admitted)) %>%
+  as_tsibble(index = date_admitted) %>%
+  fill_gaps(n = 0)
+
+incidence_df_full <- incidence_raw %>%
+  index_by(agg = ~ yearmonth(.)) %>%
+  summarise(n = sum(n)) %>%
+  rename(date_admitted = agg)
+
+incidence_df <- incidence_df_full %>%
+  filter(year(date_admitted) < 2019)
+
+incidence_df_weekly <- incidence_raw %>%
+  index_by(agg = ~ yearweek(.)) %>%
+  summarise(n = sum(n)) %>%
+  rename(date_admitted = agg)
+
+incidence_df
+```
+
+## HCMC shape
+
+```{r}
+hcmc_shp <- read_rds("../../geospatial data/gadm41_VNM_1_pk.rds") %>%
+  terra::unwrap() %>%
+  st_as_sf() %>%
+  filter(GID_1 == "VNM.25_1")
+
+hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
+```
+
+## Weather
+```{r}
+vnm_weather_2019 <- read_stars("../../meteorological data/era5/all-variables_2019_daily_VNM.nc") %>%
+  st_set_crs(4326)
+
+hcmc_temp_2019 <- vnm_weather_2019 %>%
+  aggregate(hcmc_shp_w_buff, FUN = mean) %>%
+  pull(t2m) %>%
+  as.vector() %>%
+  subtract(273.15)
+
+hcmc_precip_2019 <- vnm_weather_2019 %>%
+  aggregate(hcmc_shp_w_buff, FUN = sum) %>%
+  pull(tp) %>%
+  as.vector() %>%
+  multiply_by(1000)
+
+weather_df <- tibble(
+  date = seq.Date(as.Date("2019-01-01"), as.Date("2019-12-31"), by = "day"),
+  temp_C = hcmc_temp_2019,
+  precip_mm = hcmc_precip_2019
+) %>%
+  as_tsibble(index = date)
+
+weather_df %>%
+  pivot_longer(-date) %>%
+  ggplot() +
+  geom_line(aes(x = date, y = value, color = name))
+
+weather_df_monthly <- weather_df %>%
+  index_by(agg = ~ yearmonth(.)) %>%
+  summarise(
+    temp_C_avg = mean(temp_C),
+    precip_mm_total = sum(precip_mm)
+  ) %>%
+  rename(date = agg)
+
+weather_df_monthly %>%
+  pivot_longer(-date) %>%
+  ggplot() +
+  geom_line(aes(x = date, y = value, color = name))
+```
+
+# Data transformation
+```{r}
+incidence_df %<>% mutate(n = log(n))
+incidence_df_full %<>% mutate(n = log(n))
+incidence_df_weekly %<>% mutate(n = log(n))
+```
+
+# Incidence with weather
+```{r}
+incidence_df_2019 <- incidence_df_full %>%
+  filter(year(date_admitted) == 2019) %>%
+  mutate(n = exp(n))
+
+incidence_w_weather <- left_join(
+  incidence_df_2019,
+  weather_df_monthly %>% metan::resca(
+    temp_C_avg,
+    precip_mm_total,
+    new_min = min(incidence_df_2019$n),
+    new_max = max(incidence_df_2019$n)
+  ) %>% select(-date_res),
+  by = c("date_admitted" = "date")
+) %>%
+  pivot_longer(-date_admitted)
+
+incidence_w_weather %>%
+  filter(name %in% c("n", "temp_C_avg", "precip_mm_total")) %>%
+  autoplot() +
+  scale_x_yearmonth(
+    date_breaks = "3 months",
+    date_labels = "%m",
+    date_minor_breaks = "1 month"
+  )
+
+incidence_w_weather %>%
+  filter(name %in% c("n", "temp_C_avg_res", "precip_mm_total_res")) %>%
+  autoplot() +
+  scale_x_yearmonth(
+    date_breaks = "3 months",
+    date_labels = "%m",
+    date_minor_breaks = "1 month"
+  )
+```
