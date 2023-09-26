@@ -2,8 +2,9 @@
 output: 
   html_document:
     df_print: paged
+    toc: yes
+    theme: journal
 ---
-
 
 # Library
 
@@ -47,63 +48,66 @@ incidence_df_weekly
 
 # Time series analysis
 
-Since starts of epidemics have an exponential growth rate, we apply a logarithmic transformation to the time series.
-
 ```{r}
-p_base <- ggplot(incidence_df_weekly, aes(x = date_admitted)) +
+p_base <- ggplot(incidence_df, aes(x = date_admitted)) +
   scale_x_yearweek(date_labels = "%Y", date_breaks = "2 years")
 
 p_base + geom_line(aes(y = n))
-p_base + geom_line(aes(y = log(n)))
 ```
 
+ARIMA is based on the assumption that the time series is homoscedastic (has constant variance). We can use the White test (White, 1980), to check this. If the time series is not homoscedastic (heteroscedastic), we will perform a Box-Cox transformation.
 
-We can check if we're correct using by checking Box-Cox transformations log-likelihood along lambda from range -2 to 2, along with the Shapiro-Wilk normality test (higher p-value means cannot reject null hypothesis of normal distribution).
+```{r}
+skedastic::white(lm(n ~ date_admitted, data = incidence_df))
+```
+
+The very low p-value means that we can reject the null hypothesis of homoscedasticity, hence suggests heteroscedasticity in the time series. This means we will need to perform Box-Cox transformation next.
 
 ## Box-cox transformation
 
 ```{r}
-boxcox_mle <- unclass(MASS::boxcox(lm(incidence_df_weekly$n ~ 1))) %>% as_tibble()
+boxcox_mle <- unclass(MASS::boxcox(lm(incidence_df$n ~ 1))) %>% as_tibble()
 
-map(boxcox_mle$x, \(lambda) {
+boxcox_white_df <- map(boxcox_mle$x, \(lambda) {
   tibble(
     lambda = lambda,
-    transformed_x = list(box_cox(incidence_df_weekly$n, lambda)),
-    normal_pvalue = shapiro.test(unlist(transformed_x))$p.value
+    transformed_x = list(box_cox(incidence_df$n, lambda)),
+    white_pvalue = skedastic::white(
+      lm(unlist(transformed_x) ~ incidence_df$date_admitted)
+    )$p.value
   )
 }) %>%
-  list_c() %>%
+  list_c()
+
+boxcox_white_df %>%
   left_join(boxcox_mle, by = c("lambda" = "x")) %>%
   ggplot(aes(x = lambda)) +
-  geom_line(aes(y = normal_pvalue), color = "red") +
-  geom_line(aes(y = (y - min(y)) / 5e9), color = "blue") +
+  geom_line(aes(y = white_pvalue), color = "red") +
+  geom_line(aes(y = (y - min(y)) / 2000), color = "blue") +
   scale_y_continuous(
-    "Normality test p-value",
-    sec.axis = sec_axis(trans = ~ . * 5e9 + min(boxcox_mle$y), name = "log-Likelihood")
+    "White test p-value",
+    sec.axis = sec_axis(trans = ~ . * 2000 + min(boxcox_mle$y), name = "log-Likelihood")
   )
 ```
 
-### QQ plot
 ```{r}
+white_lambda <- boxcox_white_df %>%
+  filter(white_pvalue == max(white_pvalue)) %>%
+  pull(lambda)
 boxcox_lambda <- boxcox_mle %>%
   filter(y == max(y)) %>%
   pull(x)
+guerrero_lambda <- incidence_df %>%
+  features(n, features = guerrero) %>%
+  pull(lambda_guerrero)
 
-tibble(
-  index = 1:length(incidence_df_weekly$n),
-  precise_lambda = (incidence_df_weekly$n^boxcox_lambda - 1) / boxcox_lambda,
-  log_transformed = log(incidence_df_weekly$n),
-  sqrt_transformed = sqrt(incidence_df_weekly$n)
-) %>%
-  pivot_longer(-index, names_to = "method", values_to = "y") %>%
-  ggplot(aes(sample = y, color = method)) +
-  stat_qq() +
-  stat_qq_line() +
-  facet_wrap(~method)
+white_lambda
+boxcox_lambda
+guerrero_lambda
 ```
 
+With the tests saying the lambda for Box-Cox transformation that minimizes homoscedasticity is around -0.1 and 0. We will go with a lambda of 0, meaning performing a log transformation, as it's easier for prediction inference in the future.
 
-With the confirmation from the Box-Cox transformations and normality test (even though the p-value is very low), we apply logarithmic transformation on the data.
 
 ```{r}
 incidence_df %<>% mutate(n = log(n))
@@ -112,75 +116,68 @@ incidence_df_weekly %<>% mutate(n = log(n))
 incidence_df_full_weekly %<>% mutate(n = log(n))
 ```
 
+```{r}
+p_base + geom_line(aes(y = log(n)))
+```
+
+
 ## Unit root test
 
 "One way to determine more objectively whether differencing is required is to use a unit root test. These are statistical hypothesis tests of stationarity that are designed for determining whether differencing is required." - Hyndman, R.J., & Athanasopoulos, G. (2021). One of the many unit root test is called KPSS (Kwiatkowski-Phillips-Schmidt-Shin) test, Kwiatkowski, D., Phillips, P. C. B., Schmidt, P., & Shin, Y. (1992). For this test, the null hypothesis is stationarity, i.e. smaller p-value suggests the time series is non-stationary and differencing is required.
 
 ```{r}
-incidence_df_weekly %>% features(n, unitroot_kpss)
-incidence_df_weekly %>%
+incidence_df %>% features(n, unitroot_kpss)
+incidence_df %>%
   mutate(n = difference(n)) %>%
   features(n, unitroot_kpss)
 
 # number of differencing needed
-incidence_df_weekly %>% features(n, unitroot_ndiffs)
+incidence_df %>% features(n, unitroot_ndiffs)
 ```
 
 This means, at most, 1 differencing is required.
 
 ## Classical decomposition
+
 "The classical decomposition [...] is a relatively simple procedure, and forms the starting point for most other methods of time series decomposition. There are two forms of classical decomposition: an additive decomposition and a multiplicative decomposition."
 
 "The additive decomposition is the most appropriate if the magnitude of the seasonal fluctuations, or the variation around the trend-cycle, does not vary with the level of the time series. When the variation in the seasonal pattern, or the variation around the trend-cycle, appears to be proportional to the level of the time series, then a multiplicative decomposition is more appropriate. [...] When a log transformation has been used, this is equivalent to using a multiplicative decomposition on the original data"
 
 Since we already applied log transformation on the data, we will use additive decomposition for analysis below.
+
 ```{r}
-decomped <- incidence_df_weekly %>%
+decomped <- incidence_df %>%
   model(
-    classic_add = classical_decomposition(n, type = "additive")
+    classic_add = classical_decomposition(n, type = "additive"),
   ) %>%
   components()
 
 decomped %>% autoplot()
-```
 
-## Trend-cycle
-
-```{r}
-decomped %>%
-  as_tsibble() %>%
-  autoplot(n, colour = "gray") +
-  geom_line(aes(y = trend), color = "red")
-```
-
-## Seasonally adjusted
-
-Remove the seasonality from the time series, i.e. dengue is not a seasonal epidemic.
-
-```{r}
-decomped %>%
-  as_tsibble() %>%
-  autoplot(n, colour = "gray") +
-  geom_line(aes(y = season_adjust), colour = "#0072B2")
+incidence_df %>%
+  mutate(n = difference(n, 12)) %>%
+  model(
+    classic_add = classical_decomposition(n, type = "additive"),
+  ) %>%
+  components() %>%
+  autoplot()
 ```
 
 # Model fitting
 
 ```{r}
-incidence_df_weekly %>%
+incidence_df %>%
   gg_tsdisplay(
-    difference(n, 52),
+    difference(n, 12),
     plot_type = "partial",
-    lag = 102
+    lag = 48
   )
 ```
 
 ```{r}
-incidence_df_weekly %>%
-  filter(year(date_admitted) < 2019) %>%
-  model(auto_arima = ARIMA(n ~ pdq(2, 0, 1) + PDQ(1, 1, 0)))
+future::plan(future::multisession)
 
-fit_all <- incidence_df_weekly %>%
+fit_all <- incidence_df %>%
   filter(year(date_admitted) < 2019) %>%
   model(
     auto_arima = ARIMA(n ~ pdq(1, 0, 1) + PDQ(0, 1, 1)),
@@ -198,6 +195,8 @@ fit_all <- incidence_df_weekly %>%
     prophet_multi = prophet(n ~ season(period = 12, order = 10, type = "multiplicative")),
     prophet_addi = prophet(n ~ season(period = 12, order = 10, type = "additive"))
   )
+
+future::plan(future::sequential())
 ```
 
 # Model evaluation & selection
@@ -216,7 +215,7 @@ models
 
 # Ljung-Box test, higher means cannot reject null hypothesis of independently distributed data
 augment(fit_all) %>%
-  features(.innov, ljung_box, lag = 12, dof = 4)
+  features(.innov, ljung_box, lag = 24)
 
 accuracy(fit_all)
 
@@ -224,7 +223,51 @@ accuracy(fit_all)
 fit <- fit_all %>% select(auto_arima)
 
 fit %>%
-  gg_tsresiduals(lag = 36)
+  gg_tsresiduals(lag = 48)
+
+fit %>%
+  residuals() %>%
+  pull(.resid) %>%
+  shapiro.test()
+```
+
+### Raw
+
+```{r}
+# temp_train <- incidence_raw %>%
+#   index_by(agg = ~ yearmonth(.)) %>%
+#   summarise(n = sum(n)) %>%
+#   rename(date_admitted = agg)
+#
+# temp_fit <- temp_train %>%
+#   filter(year(date_admitted) < 2019) %>%
+#   model(auto_arima = ARIMA(n ~ pdq(1, 0, 2) + PDQ(0, 1, 1)))
+#
+# temp_forecast <- temp_fit %>%
+#   forecast(h = 12) %>%
+#   as_tibble() %>%
+#   mutate(.mean = log(.mean)) %>%
+#   select(date_admitted, .mean)
+#
+# temp_forecast %>% ggplot(aes(x = date_admitted)) +
+#   geom_line(data = temp_train, aes(y = log(n)), color = "black") +
+#   geom_line(aes(y = .mean), color = "blue") +
+#   scale_x_yearmonth(
+#     date_labels = "%Y", date_breaks = "1 year",
+#     limits = c(as.Date("2018-01-01"), as.Date("2023-01-01"))
+#   )
+#
+# Metrics::rmse(
+#   temp_train %>%
+#     filter(year(date_admitted) == 2019) %>% pull(n) %>% log(),
+#   temp_forecast$.mean
+# )
+#
+# Metrics::mae(
+#   temp_train %>%
+#     filter(year(date_admitted) == 2019) %>% pull(n) %>% log(),
+#   temp_forecast$.mean
+# )
 ```
 
 ## Residual against predictor
@@ -261,7 +304,7 @@ p_forecast <- forecasted %>%
 p_forecast
 
 p_forecast +
-  facet_wrap(~.model)
+  facet_wrap(~.model, scales = "free_y")
 ```
 
 ## Accuracy
@@ -293,78 +336,82 @@ accuracy(forecasted_2019, incidence_df_2019)
 ```
 
 ## One-month ahead forecasting
+
 ```{r}
-fit <- fit_all %>% select(auto_arima)
-
-one_step_ahead_forecast <- function(
-    model,
-    horizon = 48,
-    same_window_sz = TRUE,
-    reestimation = FALSE,
-    only_2019_test = FALSE) {
-  forecast_1w_df <- incidence_df %>% mutate(col = NA)
-
-  for (i in 1:horizon) {
-    forecasted_1w <- fit %>%
-      forecast(h = 1) %>%
-      as_tibble() %>%
-      select(date_admitted, .mean) %>%
-      rename(n = .mean) %>%
-      mutate(col = as.factor(1))
-
-    forecast_1w_df %<>% bind_rows(forecasted_1w)
-
-    fit %<>% refit(forecast_1w_df, reestimate = TRUE)
-  }
-
-  forecast_1w_df %>%
-    ggplot(aes(x = date_admitted, y = n, col = col)) +
-    geom_line() +
-    geom_line(data = incidence_df_full %>% mutate(col = as.factor(0)))
-
-  if (only_2019) {
-    test_set <- incidence_df_full %>%
-      filter(year(date_admitted) == 2019) %>%
-      pull(n)
-    forecasted_set <- forecast_1w_df %>%
-      filter(year(date_admitted) == 2019) %>%
-      pull(n)
-  } else {
-    test_set <- incidence_df_full %>%
-      filter(year(date_admitted) > 2018) %>%
-      pull(n)
-    forecasted_set <- forecast_1w_df %>%
-      filter(year(date_admitted) > 2018) %>%
-      pull(n)
-  }
-
-  list(
-    sprintf(
-      "arima_1m_ahead_%s_%s",
-      ifelse(reestimation, "reestimate", "no_reestimate"),
-      ifelse(same_window_sz, "no_truncated", "truncated")
-    ),
-    sqrt(mean((test_set - forecasted_set)^2)),
-    mean(abs(test_set - forecasted_set))
-  )
-}
-
-system.time({
-  mapply(
-    one_step_ahead_forecast,
-    model = fit,
-    list(c(TRUE, TRUE), c(TRUE, FALSE), c(FALSE, TRUE), c(FALSE, FALSE)),
-  )
-})
+# fit <- fit_all %>% select(auto_arima)
+#
+# one_step_ahead_forecast <- function(
+#     model,
+#     horizon = 48,
+#     same_window_sz = TRUE,
+#     reestimation = FALSE,
+#     only_2019_test = FALSE) {
+#   forecast_1w_df <- incidence_df %>% mutate(col = NA)
+#
+#   for (i in 1:horizon) {
+#     forecasted_1w <- fit %>%
+#       forecast(h = 1) %>%
+#       as_tibble() %>%
+#       select(date_admitted, .mean) %>%
+#       rename(n = .mean) %>%
+#       mutate(col = as.factor(1))
+#
+#     forecast_1w_df %<>% bind_rows(forecasted_1w)
+#
+#     fit %<>% refit(forecast_1w_df, reestimate = TRUE)
+#   }
+#
+#   forecast_1w_df %>%
+#     ggplot(aes(x = date_admitted, y = n, col = col)) +
+#     geom_line() +
+#     geom_line(data = incidence_df_full %>% mutate(col = as.factor(0)))
+#
+#   if (only_2019) {
+#     test_set <- incidence_df_full %>%
+#       filter(year(date_admitted) == 2019) %>%
+#       pull(n)
+#     forecasted_set <- forecast_1w_df %>%
+#       filter(year(date_admitted) == 2019) %>%
+#       pull(n)
+#   } else {
+#     test_set <- incidence_df_full %>%
+#       filter(year(date_admitted) > 2018) %>%
+#       pull(n)
+#     forecasted_set <- forecast_1w_df %>%
+#       filter(year(date_admitted) > 2018) %>%
+#       pull(n)
+#   }
+#
+#   list(
+#     sprintf(
+#       "arima_1m_ahead_%s_%s",
+#       ifelse(reestimation, "reestimate", "no_reestimate"),
+#       ifelse(same_window_sz, "no_truncated", "truncated")
+#     ),
+#     sqrt(mean((test_set - forecasted_set)^2)),
+#     mean(abs(test_set - forecasted_set))
+#   )
+# }
+#
+# system.time({
+#   mapply(
+#     one_step_ahead_forecast,
+#     model = fit,
+#     list(c(TRUE, TRUE), c(TRUE, FALSE), c(FALSE, TRUE), c(FALSE, FALSE)),
+#   )
+# })
 ```
+
+# Weekly models
+
+## SARIMA weekly
 
 ## Prophet weekly
 
 ```{r}
 prophet_weekly <- incidence_df_weekly %>%
-  filter(year(date_admitted) < 2019) %>%
   model(
-    prophet = prophet(n ~ season(period = 52, order = 10, type = "multiplicative"))
+    prophet = prophet(n ~ season(period = 52, order = 10, type = "additive"))
   )
 
 prophet_weekly_forecast <- prophet_weekly %>%
@@ -373,9 +420,9 @@ prophet_weekly_forecast <- prophet_weekly %>%
 prophet_weekly_forecast %>%
   autoplot(incidence_df_weekly)
 
-accuracy(prophet_weekly_forecast, incidence_df_weekly)
+accuracy(prophet_weekly_forecast, incidence_df_full_weekly)
 
-incidence_df_weekly_2019 <- incidence_df_weekly %>%
+incidence_df_weekly_2019 <- incidence_df_full_weekly %>%
   filter(year(date_admitted) == 2019)
 
 prophet_weekly_forecast_2019 <- prophet_weekly %>%
@@ -387,9 +434,9 @@ prophet_weekly_forecast_2019 %>%
 accuracy(prophet_weekly_forecast_2019, incidence_df_weekly_2019)
 ```
 
-
 ### With holidays
-```{r fig.height=15, fig.width=15}
+
+```{r fig.height=15, fig.width=15, warning=FALSE}
 pub_holidays <- map(2000:2022, \(year){
   c(
     sprintf("%d-01-01", year),
@@ -423,28 +470,23 @@ incidence_df_weekly %>%
   facet_wrap(~year, scales = "free_x")
 ```
 
-
 ```{r}
-prophet_weekly <- incidence_df_weekly %>%
-  filter(year(date_admitted) < 2019) %>%
+prophet_weekly_w_holiday <- incidence_df_weekly %>%
   model(
-    prophet = prophet(
-      n ~ season(period = 52, order = 10, type = "multiplicative") +
-        holiday(vn_pub_holidays_train, prior_scale = 20L)
+    prophet_w_holiday = prophet(
+      n ~ season(period = 52, order = 10, type = "additive") +
+        holiday(vn_pub_holidays_train)
     )
   )
 
-prophet_weekly_forecast <- prophet_weekly %>%
+prophet_weekly_forecast <- prophet_weekly_w_holiday %>%
   forecast(h = 208)
 
 prophet_weekly_forecast %>%
   autoplot(incidence_df_weekly) +
   geom_vline(data = vn_pub_holidays, aes(xintercept = date), color = "red", alpha = 0.1)
 
-accuracy(prophet_weekly_forecast, incidence_df_weekly)
-
-incidence_df_weekly_2019 <- incidence_df_weekly %>%
-  filter(year(date_admitted) == 2019)
+accuracy(prophet_weekly_forecast, incidence_df_full_weekly)
 
 prophet_weekly_forecast_2019 <- prophet_weekly %>%
   forecast(h = 52)
@@ -456,20 +498,19 @@ prophet_weekly_forecast_2019 %>%
 accuracy(prophet_weekly_forecast_2019, incidence_df_weekly_2019)
 ```
 
-
 # NNAR
 
 ```{r}
-nn_fit <- incidence_df %>%
-  filter(year(date_admitted) < 2019) %>%
-  model(nnar = NNETAR(n ~ AR(2, 1, "1 year")))
-
-report(nn_fit)
-
-accuracy(nn_fit)
-
-nn_forecast <- function() {
-  nn_fit %>% forecast(h = 48)
-}
-nn_forecast %>% autoplot(incidence_df_full)
+# nn_fit <- incidence_df %>%
+#   filter(year(date_admitted) < 2019) %>%
+#   model(nnar = NNETAR(n ~ AR(2, 1, "1 year")))
+#
+# report(nn_fit)
+#
+# accuracy(nn_fit)
+#
+# nn_forecast <- function() {
+#   nn_fit %>% forecast(h = 48)
+# }
+# nn_forecast %>% autoplot(incidence_df_full)
 ```
