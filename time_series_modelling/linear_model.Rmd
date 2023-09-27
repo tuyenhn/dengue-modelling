@@ -27,30 +27,20 @@ incidence_raw <- read_csv("../incidence_ts_in.csv", show_col_types = FALSE) %>%
   as_tsibble(index = date_admitted) %>%
   fill_gaps(n = 0)
 
-incidence_df_full <- incidence_raw %>%
+incidence_monthly_df <- incidence_raw %>%
   index_by(agg = ~ yearmonth(.)) %>%
   summarise(n = sum(n)) %>%
   rename(date_admitted = agg)
 
-incidence_df <- incidence_df_full %>%
+train_monthly_df <- incidence_monthly_df %>%
   filter(year(date_admitted) < 2019)
-
-incidence_df_full_weekly <- incidence_raw %>%
-  index_by(agg = ~ yearweek(.)) %>%
-  summarise(n = sum(n)) %>%
-  rename(date_admitted = agg)
-
-incidence_df_weekly <- incidence_df_full_weekly %>%
-  filter(year(date_admitted) < 2019)
-
-incidence_df_weekly
 ```
 
 # Time series analysis
 
 ```{r}
-p_base <- ggplot(incidence_df, aes(x = date_admitted)) +
-  scale_x_yearweek(date_labels = "%Y", date_breaks = "2 years")
+p_base <- ggplot(train_monthly_df, aes(x = date_admitted)) +
+  scale_x_yearmonth(date_labels = "%Y", date_breaks = "2 years")
 
 p_base + geom_line(aes(y = n))
 ```
@@ -58,7 +48,7 @@ p_base + geom_line(aes(y = n))
 ARIMA is based on the assumption that the time series is homoscedastic (has constant variance). We can use the White test (White, 1980), to check this. If the time series is not homoscedastic (heteroscedastic), we will perform a Box-Cox transformation.
 
 ```{r}
-skedastic::white(lm(n ~ date_admitted, data = incidence_df))
+skedastic::white(lm(n ~ date_admitted, data = train_monthly_df))
 ```
 
 The very low p-value means that we can reject the null hypothesis of homoscedasticity, hence suggests heteroscedasticity in the time series. This means we will need to perform Box-Cox transformation next.
@@ -66,14 +56,14 @@ The very low p-value means that we can reject the null hypothesis of homoscedast
 ## Box-cox transformation
 
 ```{r}
-boxcox_mle <- unclass(MASS::boxcox(lm(incidence_df$n ~ 1))) %>% as_tibble()
+boxcox_mle <- unclass(MASS::boxcox(lm(train_monthly_df$n ~ 1))) %>% as_tibble()
 
 boxcox_white_df <- map(boxcox_mle$x, \(lambda) {
   tibble(
     lambda = lambda,
-    transformed_x = list(box_cox(incidence_df$n, lambda)),
+    transformed_x = list(box_cox(train_monthly_df$n, lambda)),
     white_pvalue = skedastic::white(
-      lm(unlist(transformed_x) ~ incidence_df$date_admitted)
+      lm(unlist(transformed_x) ~ train_monthly_df$date_admitted)
     )$p.value
   )
 }) %>%
@@ -97,7 +87,7 @@ white_lambda <- boxcox_white_df %>%
 boxcox_lambda <- boxcox_mle %>%
   filter(y == max(y)) %>%
   pull(x)
-guerrero_lambda <- incidence_df %>%
+guerrero_lambda <- train_monthly_df %>%
   features(n, features = guerrero) %>%
   pull(lambda_guerrero)
 
@@ -110,10 +100,8 @@ With the tests saying the lambda for Box-Cox transformation that minimizes homos
 
 
 ```{r}
-incidence_df %<>% mutate(n = log(n))
-incidence_df_full %<>% mutate(n = log(n))
-incidence_df_weekly %<>% mutate(n = log(n))
-incidence_df_full_weekly %<>% mutate(n = log(n))
+train_monthly_df %<>% mutate(n = log(n))
+incidence_monthly_df %<>% mutate(n = log(n))
 ```
 
 ```{r}
@@ -123,19 +111,14 @@ p_base + geom_line(aes(y = log(n)))
 
 ## Unit root test
 
-"One way to determine more objectively whether differencing is required is to use a unit root test. These are statistical hypothesis tests of stationarity that are designed for determining whether differencing is required." - Hyndman, R.J., & Athanasopoulos, G. (2021). One of the many unit root test is called KPSS (Kwiatkowski-Phillips-Schmidt-Shin) test, Kwiatkowski, D., Phillips, P. C. B., Schmidt, P., & Shin, Y. (1992). For this test, the null hypothesis is stationarity, i.e. smaller p-value suggests the time series is non-stationary and differencing is required.
+"One way to determine more objectively whether differencing is required is to use a unit root test. These are statistical hypothesis tests of stationarity that are designed for determining whether differencing is required." - Hyndman, R.J., & Athanasopoulos, G. (2021). One of the many unit root test is called KPSS (Kwiatkowski-Phillips-Schmidt-Shin) test, Kwiatkowski, D., Phillips, P. C. B., Schmidt, P., & Shin, Y. (1992). For this test, the null hypothesis is stationarity, i.e. smaller p-value suggests the time series is non-stationary and differencing is needed.
 
 ```{r}
-incidence_df %>% features(n, unitroot_kpss)
-incidence_df %>%
-  mutate(n = difference(n)) %>%
-  features(n, unitroot_kpss)
-
-# number of differencing needed
-incidence_df %>% features(n, unitroot_ndiffs)
+train_monthly_df %>% features(n, unitroot_ndiffs)
+train_monthly_df %>% features(n, unitroot_nsdiffs)
 ```
 
-This means, at most, 1 differencing is required.
+This means, 1 non-seasonal differencing and 1 seasonal differencing is suggested.
 
 ## Classical decomposition
 
@@ -146,15 +129,15 @@ This means, at most, 1 differencing is required.
 Since we already applied log transformation on the data, we will use additive decomposition for analysis below.
 
 ```{r}
-decomped <- incidence_df %>%
+train_monthly_df %>%
+  mutate(n = difference(n, 1)) %>%
   model(
     classic_add = classical_decomposition(n, type = "additive"),
   ) %>%
-  components()
+  components() %>%
+  autoplot()
 
-decomped %>% autoplot()
-
-incidence_df %>%
+train_monthly_df %>%
   mutate(n = difference(n, 12)) %>%
   model(
     classic_add = classical_decomposition(n, type = "additive"),
@@ -166,7 +149,14 @@ incidence_df %>%
 # Model fitting
 
 ```{r}
-incidence_df %>%
+train_monthly_df %>%
+  gg_tsdisplay(
+    difference(n),
+    plot_type = "partial",
+    lag = 12
+  )
+
+train_monthly_df %>%
   gg_tsdisplay(
     difference(n, 12),
     plot_type = "partial",
@@ -177,16 +167,12 @@ incidence_df %>%
 ```{r}
 future::plan(future::multisession)
 
-fit_all <- incidence_df %>%
-  filter(year(date_admitted) < 2019) %>%
+fit_all <- train_monthly_df %>%
   model(
     auto_arima = ARIMA(n ~ pdq(1, 0, 1) + PDQ(0, 1, 1)),
 
     # no seasonal component, AR(1) because of spike at lag-1 in PACF, 1 differencing
     arima110_010 = ARIMA(n ~ pdq(1, 1, 0) + PDQ(0, 1, 0)),
-
-    # AR(1) because of spike at lag-1 of every start of season. 1 seasonal differencing, no seasonal AR.
-    arima100_010 = ARIMA(n ~ pdq(1, 0, 0) + PDQ(0, 1, 0)),
 
     # Johansson et al. (2016) (no MA)
     arima100_310 = ARIMA(n ~ pdq(1, 0, 0) + PDQ(3, 1, 0)),
@@ -217,7 +203,7 @@ models
 augment(fit_all) %>%
   features(.innov, ljung_box, lag = 24)
 
-accuracy(fit_all)
+fabletools::accuracy(fit_all)
 
 # ARIMA(1,0,1)(0,1,1)[12] has lowest AIC(c)
 fit <- fit_all %>% select(auto_arima)
@@ -273,7 +259,7 @@ fit %>%
 ## Residual against predictor
 
 ```{r}
-incidence_df %>%
+train_monthly_df %>%
   as_tibble() %>%
   left_join(residuals(fit), by = "date_admitted") %>%
   pivot_longer(n) %>%
@@ -295,7 +281,7 @@ augment(fit) %>%
 forecasted <- forecast(fit_all, h = 48)
 
 p_forecast <- forecasted %>%
-  autoplot(incidence_df_full) +
+  autoplot(incidence_monthly_df) +
   scale_x_yearmonth(
     date_labels = "%Y", date_breaks = "1 year",
     limits = c(as.Date("2018-01-01"), as.Date("2023-01-01"))
@@ -310,7 +296,7 @@ p_forecast +
 ## Accuracy
 
 ```{r}
-accuracy(forecasted, incidence_df_full)
+accuracy(forecasted, incidence_monthly_df)
 ```
 
 ## 2019 only
@@ -318,13 +304,13 @@ accuracy(forecasted, incidence_df_full)
 Use fitted models to forecast for 2019 only
 
 ```{r}
-incidence_df_2019 <- incidence_df_full %>%
+train_monthly_df_2019 <- incidence_monthly_df %>%
   filter(year(date_admitted) == 2019)
 
 forecasted_2019 <- forecast(fit_all, h = 12)
 
 p_forecast_2019 <- forecasted_2019 %>%
-  autoplot(incidence_df_2019) +
+  autoplot(train_monthly_df_2019) +
   scale_x_yearmonth(date_breaks = "3 months", date_labels = "%b", date_minor_breaks = "1 month")
 
 p_forecast_2019
@@ -332,7 +318,7 @@ p_forecast_2019
 p_forecast_2019 +
   facet_wrap(~.model)
 
-accuracy(forecasted_2019, incidence_df_2019)
+accuracy(forecasted_2019, train_monthly_df_2019)
 ```
 
 ## One-month ahead forecasting
@@ -346,7 +332,7 @@ accuracy(forecasted_2019, incidence_df_2019)
 #     same_window_sz = TRUE,
 #     reestimation = FALSE,
 #     only_2019_test = FALSE) {
-#   forecast_1w_df <- incidence_df %>% mutate(col = NA)
+#   forecast_1w_df <- train_monthly_df %>% mutate(col = NA)
 #
 #   for (i in 1:horizon) {
 #     forecasted_1w <- fit %>%
@@ -364,17 +350,17 @@ accuracy(forecasted_2019, incidence_df_2019)
 #   forecast_1w_df %>%
 #     ggplot(aes(x = date_admitted, y = n, col = col)) +
 #     geom_line() +
-#     geom_line(data = incidence_df_full %>% mutate(col = as.factor(0)))
+#     geom_line(data = incidence_monthly_df %>% mutate(col = as.factor(0)))
 #
 #   if (only_2019) {
-#     test_set <- incidence_df_full %>%
+#     test_set <- incidence_monthly_df %>%
 #       filter(year(date_admitted) == 2019) %>%
 #       pull(n)
 #     forecasted_set <- forecast_1w_df %>%
 #       filter(year(date_admitted) == 2019) %>%
 #       pull(n)
 #   } else {
-#     test_set <- incidence_df_full %>%
+#     test_set <- incidence_monthly_df %>%
 #       filter(year(date_admitted) > 2018) %>%
 #       pull(n)
 #     forecasted_set <- forecast_1w_df %>%
@@ -400,117 +386,4 @@ accuracy(forecasted_2019, incidence_df_2019)
 #     list(c(TRUE, TRUE), c(TRUE, FALSE), c(FALSE, TRUE), c(FALSE, FALSE)),
 #   )
 # })
-```
-
-# Weekly models
-
-## SARIMA weekly
-
-## Prophet weekly
-
-```{r}
-prophet_weekly <- incidence_df_weekly %>%
-  model(
-    prophet = prophet(n ~ season(period = 52, order = 10, type = "additive"))
-  )
-
-prophet_weekly_forecast <- prophet_weekly %>%
-  forecast(h = 208)
-
-prophet_weekly_forecast %>%
-  autoplot(incidence_df_weekly)
-
-accuracy(prophet_weekly_forecast, incidence_df_full_weekly)
-
-incidence_df_weekly_2019 <- incidence_df_full_weekly %>%
-  filter(year(date_admitted) == 2019)
-
-prophet_weekly_forecast_2019 <- prophet_weekly %>%
-  forecast(h = 52)
-
-prophet_weekly_forecast_2019 %>%
-  autoplot(incidence_df_weekly_2019)
-
-accuracy(prophet_weekly_forecast_2019, incidence_df_weekly_2019)
-```
-
-### With holidays
-
-```{r fig.height=15, fig.width=15, warning=FALSE}
-pub_holidays <- map(2000:2022, \(year){
-  c(
-    sprintf("%d-01-01", year),
-    sprintf("%d-12-29", subtract(year, 1)) %>% lunR::lunar_to_gregorian(),
-    sprintf("%d-03-10", year) %>% lunR::lunar_to_gregorian(),
-    sprintf("%d-04-30", year),
-    sprintf("%d-05-01", year),
-    sprintf("%d-09-02", year)
-  )
-}) %>%
-  list_c() %>%
-  as.Date()
-
-vn_pub_holidays <- tsibble(
-  date = pub_holidays,
-  holiday = rep(
-    c("New Year", "Tet", "Hung King", "Reunification", "Labor Day", "Independence Day"),
-    23
-  ),
-  lower_window = rep(c(0, 0, 0, 0, 0, 0), 23),
-  upper_window = rep(c(1, 7, 1, 1, 1, 2), 23),
-  index = date
-)
-
-vn_pub_holidays_train <- vn_pub_holidays %>% filter(year(date) < 2019)
-
-incidence_df_weekly %>%
-  mutate(year = year(date_admitted)) %>%
-  autoplot() +
-  geom_vline(data = vn_pub_holidays, aes(xintercept = date), color = "red", alpha = 0.3) +
-  facet_wrap(~year, scales = "free_x")
-```
-
-```{r}
-prophet_weekly_w_holiday <- incidence_df_weekly %>%
-  model(
-    prophet_w_holiday = prophet(
-      n ~ season(period = 52, order = 10, type = "additive") +
-        holiday(vn_pub_holidays_train)
-    )
-  )
-
-prophet_weekly_forecast <- prophet_weekly_w_holiday %>%
-  forecast(h = 208)
-
-prophet_weekly_forecast %>%
-  autoplot(incidence_df_weekly) +
-  geom_vline(data = vn_pub_holidays, aes(xintercept = date), color = "red", alpha = 0.1)
-
-accuracy(prophet_weekly_forecast, incidence_df_full_weekly)
-
-prophet_weekly_forecast_2019 <- prophet_weekly %>%
-  forecast(h = 52)
-
-prophet_weekly_forecast_2019 %>%
-  autoplot(incidence_df_weekly_2019) +
-  geom_vline(data = vn_pub_holidays, aes(xintercept = date), color = "red", alpha = 0.1)
-
-accuracy(prophet_weekly_forecast_2019, incidence_df_weekly_2019)
-```
-
-# NNAR
-
-```{r}
-# nn_fit <- incidence_df %>%
-#   filter(year(date_admitted) < 2019) %>%
-#   model(nnar = NNETAR(n ~ AR(2, 1, "1 year")))
-#
-# report(nn_fit)
-#
-# accuracy(nn_fit)
-#
-# nn_forecast <- function() {
-#   nn_fit %>% forecast(h = 48)
-# }
-# nn_forecast %>% autoplot(incidence_df_full)
 ```
