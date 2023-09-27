@@ -1,0 +1,226 @@
+---
+output: 
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: journal
+---
+
+# Library
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(magrittr)
+library(feasts)
+library(tsibble)
+library(fable.prophet)
+library(fabletools)
+library(fable)
+library(lubridate)
+```
+
+
+# Data ingestion
+
+## Incidence data
+
+```{r}
+incidence_raw <- read_csv("../incidence_ts_in.csv", show_col_types = FALSE) %>%
+  mutate(date_admitted = as.Date(date_admitted)) %>%
+  as_tsibble(index = date_admitted) %>%
+  fill_gaps(n = 0)
+
+incidence_weekly_df <- incidence_raw %>%
+  index_by(agg = ~ yearweek(.)) %>%
+  summarise(n = sum(n)) %>%
+  rename(date_admitted = agg)
+
+train_weekly_df <- incidence_weekly_df %>%
+  filter(year(date_admitted) < 2019)
+
+incidence_weekly_df
+```
+
+```{r}
+incidence_weekly_df %<>% mutate(n = log(n))
+train_weekly_df %<>% mutate(n = log(n))
+```
+
+```{r}
+ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
+  geom_line()
+```
+
+
+
+# Weekly models
+
+## SARIMA weekly
+
+### Differencing
+Quickly check if any differencing needed, both seasonal and non-seasonal
+```{r}
+train_weekly_df %>% features(n, unitroot_ndiffs)
+train_weekly_df %>% features(n, unitroot_nsdiffs)
+```
+
+```{r}
+train_weekly_df %>%
+  gg_tsdisplay(
+    difference(n),
+    plot_type = "partial",
+    lag = 52
+  )
+
+train_weekly_df %>%
+  gg_tsdisplay(
+    difference(n, 52),
+    plot_type = "partial",
+    lag = 208
+  )
+```
+### Model fitting
+
+```{r}
+sarima_fits <- train_weekly_df %>% model(
+  auto_arima = ARIMA(n ~ pdq(2, 0, 1) + PDQ(1, 1, 0)),
+
+  # same as auto_arima but with non-seasonal differencing
+  arima_211110 = ARIMA(n ~ pdq(2, 1, 1) + PDQ(1, 1, 0))
+)
+```
+
+```{r}
+report(sarima_fits)
+
+accuracy(sarima_fits)
+
+fit <- sarima_fits %>% select(auto_arima)
+
+# residuals
+fit %>% gg_tsresiduals(lag = 104)
+
+fit_resid <- fit %>%
+  residuals() %>%
+  as_tibble()
+
+shapiro.test(fit_resid$.resid)
+skedastic::white(lm(.resid ~ date_admitted, data = fit_resid))
+```
+
+
+```{r}
+sarima_fits %>%
+  augment() %>%
+  features(.innov, ljung_box, lag = min(2 * 52, nrow(train_weekly_df) / 5), dof = 3)
+```
+
+### Forecast
+```{r}
+forecasted_sarima <- forecast(sarima_fits, h = 52)
+
+incidence_2019_weekly_df <- incidence_weekly_df %>% filter(year(date_admitted) == 2019)
+
+forecast_p <- forecasted_sarima %>%
+  autoplot(incidence_2019_weekly_df) +
+  scale_x_yearweek(date_breaks = "3 months", date_labels = "%b")
+
+forecast_p + facet_wrap(~.model)
+```
+
+
+```{r}
+forecasted_sarima %>% accuracy(incidence_2019_weekly_df)
+```
+
+## SARIMA one-week-ahead
+```{r}
+# https://stackoverflow.com/questions/64320139/does-the-forecast-function-within-fable-provide-one-step-forecasts
+
+train_df <- incidence_weekly_df %>% filter(year(date_admitted) < 2020)
+
+fit <- head(train_df, -52) %>% model(ARIMA(n))
+
+fit_test <- refit(fit, new_data = tail(train_df, 52), reestimate = FALSE)
+
+accuract(fit_test)
+
+```
+
+
+## Prophet weekly
+
+```{r}
+prophet_weekly <- train_weekly_df %>%
+  model(
+    prophet_addi = prophet(n ~ season(period = 52, order = 10, type = "additive")),
+    prophet_multi = prophet(n ~ season(period = 52, order = 10, type = "multiplicative"))
+  )
+
+prophet_weekly_forecast <- prophet_weekly %>%
+  forecast(h = 52)
+
+prophet_forecast_p <- prophet_weekly_forecast %>%
+  autoplot(incidence_2019_weekly_df) +
+  scale_x_yearweek(date_breaks = "3 months", date_labels = "%b")
+
+prophet_forecast_p
+prophet_forecast_p + facet_wrap(~.model)
+
+accuracy(prophet_weekly_forecast, incidence_2019_weekly_df)
+```
+
+### With holidays
+
+```{r fig.height=15, fig.width=15, warning=FALSE}
+pub_holidays <- map(2000:2022, \(year){
+  c(
+    sprintf("%d-01-01", year),
+    sprintf("%d-12-29", subtract(year, 1)) %>% lunR::lunar_to_gregorian(),
+    sprintf("%d-03-10", year) %>% lunR::lunar_to_gregorian(),
+    sprintf("%d-04-30", year),
+    sprintf("%d-05-01", year),
+    sprintf("%d-09-02", year)
+  )
+}) %>%
+  list_c() %>%
+  as.Date()
+
+vn_pub_holidays <- tsibble(
+  date = pub_holidays,
+  holiday = rep(
+    c("New Year", "Tet", "Hung King", "Reunification", "Labor Day", "Independence Day"),
+    23
+  ),
+  lower_window = rep(c(0, 0, 0, 0, 0, 0), 23),
+  upper_window = rep(c(1, 7, 1, 1, 1, 2), 23),
+  index = date
+)
+
+vn_pub_holidays_train <- vn_pub_holidays %>% filter(year(date) < 2019)
+
+incidence_weekly_df %>%
+  mutate(year = year(date_admitted)) %>%
+  autoplot() +
+  geom_vline(data = vn_pub_holidays, aes(xintercept = date), color = "red", alpha = 0.3) +
+  facet_wrap(~year, scales = "free_x")
+```
+
+```{r}
+prophet_weekly_w_holiday <- train_weekly_df %>%
+  model(
+    prophet_w_holiday = prophet(
+      n ~ season(period = 52, order = 10, type = "additive") +
+        holiday(vn_pub_holidays_train)
+    )
+  )
+
+prophet_weekly_forecast <- prophet_weekly_w_holiday %>%
+  forecast(h = 52)
+
+prophet_weekly_forecast %>%
+  autoplot(incidence_2019_weekly_df) +
+  geom_vline(data = vn_pub_holidays, aes(xintercept = date), color = "red", alpha = 0.1)
+
+accuracy(prophet_weekly_forecast, incidence_2019_weekly_df)
+```
