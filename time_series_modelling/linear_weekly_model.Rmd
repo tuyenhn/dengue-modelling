@@ -11,13 +11,19 @@ output:
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
 library(magrittr)
+
 library(feasts)
 library(tsibble)
 library(fable.prophet)
 library(fabletools)
 library(fable)
+
 library(lubridate)
+
 library(ggdist)
+
+library(sf)
+library(stars)
 ```
 
 
@@ -39,11 +45,42 @@ incidence_weekly_df <- incidence_raw %>%
 train_weekly_df <- incidence_weekly_df %>%
   filter(year(date_admitted) < 2019)
 
-incidence_weekly_df
+ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
+  geom_line()
+```
+
+## HCMC shape
+
+```{r}
+hcmc_shp <- read_rds("../gadm/gadm41_VNM_1_pk.rds") %>%
+  terra::unwrap() %>%
+  st_as_sf() %>%
+  filter(GID_1 == "VNM.25_1")
+
+hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
+```
+
+## Temperature data
+```{r}
+hcmc_temp_2019 <- read_stars("../2m_temp_HCMC.nc") %>%
+  st_set_crs(4326) %>%
+  aggregate(hcmc_shp_w_buff, FUN = mean) %>%
+  aggregate("1 week", FUN = mean) %>%
+  as_tibble() %>%
+  select(time, `2m_temp_HCMC.nc`) %>%
+  rename(date = time, t2m = `2m_temp_HCMC.nc`) %>%
+  mutate(date = as.Date(date) %>% yearweek(), t2m = t2m - 273.15) %>%
+  as_tsibble()
+
+hcmc_temp_2019 %>%
+  ggplot(aes(x = date, y = t2m)) +
+  geom_line() +
+  geom_smooth()
 ```
 
 # Data transformation
 
+## Log transformation
 ```{r}
 incidence_weekly_df %<>% mutate(n = log(n))
 train_weekly_df %<>% mutate(n = log(n))
@@ -272,4 +309,59 @@ prophet_weekly_forecast %>%
   geom_vline(data = vn_pub_holidays, aes(xintercept = date), color = "red", alpha = 0.1)
 
 accuracy(prophet_weekly_forecast, incidence_2019_weekly_df)
+```
+
+## SARIMAX
+
+```{r}
+train_weekly_t2m_df <- train_weekly_df %>% left_join(hcmc_temp_2019, by = c("date_admitted" = "date"))
+
+sarimax_fit <- train_weekly_t2m_df %>% model(
+  auto_arima = ARIMA(n ~ xreg(t2m) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
+)
+```
+
+
+### Fit performance
+```{r}
+report(sarimax_fit)
+
+accuracy(sarimax_fit)
+
+# residuals
+sarimax_fit %>% gg_tsresiduals(lag = 104)
+
+fit_resid <- sarimax_fit %>%
+  residuals() %>%
+  as_tibble()
+
+shapiro.test(fit_resid$.resid)
+skedastic::white(lm(.resid ~ date_admitted, data = fit_resid))
+
+
+sarimax_fit %>%
+  augment() %>%
+  features(.innov, ljung_box, lag = min(2 * 52, nrow(train_weekly_df) / 5), dof = 3)
+```
+
+
+### Forecasting
+```{r}
+forecasted_sarimax <- forecast(
+  sarimax_fit,
+  new_data = hcmc_temp_2019 %>% filter(year(date) == 2019),
+  h = 52
+)
+
+incidence_2019_weekly_df <- incidence_weekly_df %>%
+  filter(year(date_admitted) == 2019) %>%
+  rename(date = date_admitted)
+
+forecast_p <- forecasted_sarimax %>%
+  autoplot(incidence_2019_weekly_df) +
+  scale_x_yearweek(date_breaks = "3 months", date_labels = "%b")
+
+forecast_p
+
+accuracy(forecasted_sarimax, incidence_2019_weekly_df)
 ```
