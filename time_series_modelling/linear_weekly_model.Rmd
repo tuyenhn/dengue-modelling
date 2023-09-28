@@ -17,6 +17,7 @@ library(fable.prophet)
 library(fabletools)
 library(fable)
 library(lubridate)
+library(ggdist)
 ```
 
 
@@ -79,15 +80,20 @@ train_weekly_df %>%
     lag = 208
   )
 ```
+
 ### Model fitting
 
 ```{r}
+future::plan(future::multisession)
+
 sarima_fits <- train_weekly_df %>% model(
   auto_arima = ARIMA(n ~ pdq(2, 0, 1) + PDQ(1, 1, 0)),
 
   # same as auto_arima but with non-seasonal differencing
   arima_211110 = ARIMA(n ~ pdq(2, 1, 1) + PDQ(1, 1, 0))
 )
+
+future::plan(future::sequential())
 ```
 
 ```{r}
@@ -134,17 +140,57 @@ forecasted_sarima %>% accuracy(incidence_2019_weekly_df)
 ```
 
 ## SARIMA one-week-ahead
+
 ```{r}
-# https://stackoverflow.com/questions/64320139/does-the-forecast-function-within-fable-provide-one-step-forecasts
+fit <- sarima_fits %>% select(auto_arima)
 
-train_df <- incidence_weekly_df %>% filter(year(date_admitted) < 2020)
+forecast_1w_df <- train_weekly_df %>% mutate(ci = NA)
 
-fit <- head(train_df, -52) %>% model(ARIMA(n))
+for (i in 1:52) {
+  forecasted_1w <- fit %>%
+    forecast(h = 1) %>%
+    as_tibble() %>%
+    select(date_admitted, .mean, n) %>%
+    rename(ci = n, n = .mean)
 
-fit_test <- refit(fit, new_data = tail(train_df, 52), reestimate = FALSE)
+  forecast_1w_df %<>% tail(-1) %>% bind_rows(forecasted_1w)
 
-accuract(fit_test)
+  fit %<>% refit(forecast_1w_df, reestimate = FALSE)
+}
 
+ggplot(mapping = aes(x = date_admitted)) +
+  stat_lineribbon(
+    data = forecast_1w_df,
+    aes(ydist = ci),
+    linewidth = .5,
+    .width = c(0.8, 0.95),
+    color = "blue"
+  ) +
+  geom_line(
+    data = incidence_weekly_df,
+    aes(y = n)
+  ) +
+  scale_fill_brewer() +
+  scale_x_yearweek(limit = c(as.Date("2018-01-01"), as.Date("2020-01-01")))
+```
+
+### Accuracy
+```{r}
+actual <- incidence_weekly_df %>%
+  filter(year(date_admitted) == 2019) %>%
+  pull(n)
+forecasted <- forecast_1w_df %>%
+  filter(year(date_admitted) == 2019) %>%
+  pull(n)
+
+sprintf(
+  "RMSE: %f",
+  sqrt(mean((actual - forecasted)^2))
+)
+sprintf(
+  "MAE: %f",
+  mean(abs(actual - forecasted))
+)
 ```
 
 
@@ -173,6 +219,9 @@ accuracy(prophet_weekly_forecast, incidence_2019_weekly_df)
 ### With holidays
 
 ```{r fig.height=15, fig.width=15, warning=FALSE}
+lunR::lunar_to_gregorian("2001-12-29")
+
+
 pub_holidays <- map(2000:2022, \(year){
   c(
     sprintf("%d-01-01", year),
