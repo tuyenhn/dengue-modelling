@@ -13,8 +13,11 @@ library(tidyverse)
 library(magrittr)
 library(feasts)
 library(tsibble)
-library(fpp3)
 library(fable.prophet)
+library(fabletools)
+library(fable)
+library(lubridate)
+library(ggdist)
 ```
 
 # Data ingestion
@@ -324,30 +327,66 @@ accuracy(forecasted_2019, train_monthly_df_2019)
 ## One-month ahead forecasting
 
 ```{r}
-# fit <- fit_all %>% select(auto_arima)
-#
+fit <- fit_all %>% select(auto_arima)
+
+forecast_1m_df <- train_monthly_df %>% mutate(ci = NA, col = as.factor(0))
+
+for (i in 1:12) {
+  forecasted_1m <- fit %>%
+    forecast(h = 1) %>%
+    as_tibble() %>%
+    select(date_admitted, .mean, n) %>%
+    rename(ci = n, n = .mean) %>%
+    mutate(col = as.factor(1))
+
+  forecast_1m_df %<>% bind_rows(forecasted_1m)
+
+  fit %<>% refit(forecast_1m_df, reestimate = FALSE)
+}
+
+
+
+ggplot(mapping = aes(x = date_admitted)) +
+  geom_line(
+    data = train_monthly_df,
+    aes(y = n)
+  ) +
+  stat_lineribbon(
+    data = forecast_1m_df,
+    aes(ydist = ci),
+    linewidth = .5,
+    .width = c(0.8, 0.95),
+    color = "blue"
+  ) +
+  scale_fill_brewer()
+# +
+# scale_x_yearmonth(limit = c(as.Date("2018-01-01"), as.Date("2020-01-01")))
+```
+
+
+```{r}
 # one_step_ahead_forecast <- function(
 #     model,
 #     horizon = 48,
 #     same_window_sz = TRUE,
 #     reestimation = FALSE,
 #     only_2019_test = FALSE) {
-#   forecast_1w_df <- train_monthly_df %>% mutate(col = NA)
+#   forecast_1m_df <- train_monthly_df %>% mutate(col = 0)
 #
 #   for (i in 1:horizon) {
-#     forecasted_1w <- fit %>%
+#     forecasted_1m <- fit %>%
 #       forecast(h = 1) %>%
 #       as_tibble() %>%
-#       select(date_admitted, .mean) %>%
-#       rename(n = .mean) %>%
+#       select(date_admitted, .mean, n) %>%
+#       rename(ci = n, n = .mean) %>%
 #       mutate(col = as.factor(1))
 #
-#     forecast_1w_df %<>% bind_rows(forecasted_1w)
+#     forecast_1m_df %<>% bind_rows(forecasted_1m)
 #
-#     fit %<>% refit(forecast_1w_df, reestimate = TRUE)
+#     fit %<>% refit(forecast_1m_df, reestimate = FALSE)
 #   }
 #
-#   forecast_1w_df %>%
+#   forecast_1m_df %>%
 #     ggplot(aes(x = date_admitted, y = n, col = col)) +
 #     geom_line() +
 #     geom_line(data = incidence_monthly_df %>% mutate(col = as.factor(0)))
@@ -356,14 +395,14 @@ accuracy(forecasted_2019, train_monthly_df_2019)
 #     test_set <- incidence_monthly_df %>%
 #       filter(year(date_admitted) == 2019) %>%
 #       pull(n)
-#     forecasted_set <- forecast_1w_df %>%
+#     forecasted_set <- forecast_1m_df %>%
 #       filter(year(date_admitted) == 2019) %>%
 #       pull(n)
 #   } else {
 #     test_set <- incidence_monthly_df %>%
 #       filter(year(date_admitted) > 2018) %>%
 #       pull(n)
-#     forecasted_set <- forecast_1w_df %>%
+#     forecasted_set <- forecast_1m_df %>%
 #       filter(year(date_admitted) > 2018) %>%
 #       pull(n)
 #   }
@@ -378,12 +417,4 @@ accuracy(forecasted_2019, train_monthly_df_2019)
 #     mean(abs(test_set - forecasted_set))
 #   )
 # }
-#
-# system.time({
-#   mapply(
-#     one_step_ahead_forecast,
-#     model = fit,
-#     list(c(TRUE, TRUE), c(TRUE, FALSE), c(FALSE, TRUE), c(FALSE, FALSE)),
-#   )
-# })
 ```
