@@ -42,12 +42,12 @@ train_weekly_df <- incidence_weekly_df %>%
 incidence_weekly_df
 ```
 
+# Data transformation
+
 ```{r}
 incidence_weekly_df %<>% mutate(n = log(n))
 train_weekly_df %<>% mutate(n = log(n))
-```
 
-```{r}
 ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
   geom_line()
 ```
