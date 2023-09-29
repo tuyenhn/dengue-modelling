@@ -6,6 +6,8 @@ output:
     theme: journal
 ---
 
+**Knitted at: `r Sys.time()`**
+
 # Library
 
 ```{r message=FALSE, warning=FALSE}
@@ -25,7 +27,6 @@ library(ggdist)
 library(sf)
 library(stars)
 ```
-
 
 # Data ingestion
 
@@ -61,8 +62,11 @@ hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
 ```
 
 ## Temperature data
+
+Temperature data information: ![](temp_era5_req.png)
+
 ```{r}
-hcmc_temp_2019 <- read_stars("../2m_temp_HCMC.nc") %>%
+hcmc_temp_df <- read_stars("../2m_temp_HCMC.nc") %>%
   st_set_crs(4326) %>%
   aggregate(hcmc_shp_w_buff, FUN = mean) %>%
   aggregate("1 week", FUN = mean) %>%
@@ -72,7 +76,7 @@ hcmc_temp_2019 <- read_stars("../2m_temp_HCMC.nc") %>%
   mutate(date = as.Date(date) %>% yearweek(), t2m = t2m - 273.15) %>%
   as_tsibble()
 
-hcmc_temp_2019 %>%
+hcmc_temp_df %>%
   ggplot(aes(x = date, y = t2m)) +
   geom_line() +
   geom_smooth()
@@ -81,6 +85,7 @@ hcmc_temp_2019 %>%
 # Data transformation
 
 ## Log transformation
+
 ```{r}
 incidence_weekly_df %<>% mutate(n = log(n))
 train_weekly_df %<>% mutate(n = log(n))
@@ -89,14 +94,14 @@ ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
   geom_line()
 ```
 
-
-
 # Weekly models
 
 ## SARIMA weekly
 
 ### Differencing
+
 Quickly check if any differencing needed, both seasonal and non-seasonal
+
 ```{r}
 train_weekly_df %>% features(n, unitroot_ndiffs)
 train_weekly_df %>% features(n, unitroot_nsdiffs)
@@ -151,7 +156,6 @@ shapiro.test(fit_resid$.resid)
 skedastic::white(lm(.resid ~ date_admitted, data = fit_resid))
 ```
 
-
 ```{r}
 sarima_fits %>%
   augment() %>%
@@ -159,6 +163,7 @@ sarima_fits %>%
 ```
 
 ### Forecast
+
 ```{r}
 forecasted_sarima <- forecast(sarima_fits, h = 52)
 
@@ -170,7 +175,6 @@ forecast_p <- forecasted_sarima %>%
 
 forecast_p + facet_wrap(~.model)
 ```
-
 
 ```{r}
 forecasted_sarima %>% accuracy(incidence_2019_weekly_df)
@@ -212,6 +216,7 @@ ggplot(mapping = aes(x = date_admitted)) +
 ```
 
 ### Accuracy
+
 ```{r}
 actual <- incidence_weekly_df %>%
   filter(year(date_admitted) == 2019) %>%
@@ -229,7 +234,6 @@ sprintf(
   mean(abs(actual - forecasted))
 )
 ```
-
 
 ## Prophet weekly
 
@@ -314,15 +318,15 @@ accuracy(prophet_weekly_forecast, incidence_2019_weekly_df)
 ## SARIMAX
 
 ```{r}
-train_weekly_t2m_df <- train_weekly_df %>% left_join(hcmc_temp_2019, by = c("date_admitted" = "date"))
+train_weekly_t2m_df <- train_weekly_df %>% left_join(hcmc_temp_df, by = c("date_admitted" = "date"))
 
 sarimax_fit <- train_weekly_t2m_df %>% model(
   auto_arima = ARIMA(n ~ xreg(t2m) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
 )
 ```
 
-
 ### Fit performance
+
 ```{r}
 report(sarimax_fit)
 
@@ -344,12 +348,12 @@ sarimax_fit %>%
   features(.innov, ljung_box, lag = min(2 * 52, nrow(train_weekly_df) / 5), dof = 3)
 ```
 
-
 ### Forecasting
+
 ```{r}
 forecasted_sarimax <- forecast(
   sarimax_fit,
-  new_data = hcmc_temp_2019 %>% filter(year(date) == 2019),
+  new_data = hcmc_temp_df %>% filter(year(date) == 2019),
   h = 52
 )
 
