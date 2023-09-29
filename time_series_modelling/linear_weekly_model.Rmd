@@ -1,4 +1,5 @@
 ---
+title: "Dengue weekly incidence modelling"
 output: 
   html_document:
     df_print: paged
@@ -68,19 +69,55 @@ Temperature data information: ![](temp_era5_req.png)
 ```{r}
 hcmc_temp_df <- read_stars("../2m_temp_HCMC.nc") %>%
   st_set_crs(4326) %>%
-  aggregate(hcmc_shp_w_buff, FUN = mean) %>%
   aggregate("1 week", FUN = mean) %>%
+  aggregate(hcmc_shp_w_buff, FUN = mean) %>%
   as_tibble() %>%
   select(time, `2m_temp_HCMC.nc`) %>%
   rename(date = time, t2m = `2m_temp_HCMC.nc`) %>%
-  mutate(date = as.Date(date) %>% yearweek(), t2m = t2m - 273.15) %>%
+  mutate(
+    date = as.Date(date) %>% yearweek(),
+    t2m = t2m - 273.15,
+    scaled_t2m = scale(t2m)
+  ) %>%
   as_tsibble()
 
 hcmc_temp_df %>%
   ggplot(aes(x = date, y = t2m)) +
   geom_line() +
   geom_smooth()
+
+hist(hcmc_temp_df$t2m)
+
+hist(hcmc_temp_df$scaled_t2m)
 ```
+
+## Precipitation data
+
+```{r}
+hcmc_precip_df <- read_stars("../2m_precip_HCMC.nc") %>%
+  st_set_crs(4326) %>%
+  aggregate("1 week", FUN = sum) %>%
+  aggregate(hcmc_shp_w_buff, FUN = sum) %>%
+  as_tibble() %>%
+  select(time, `2m_precip_HCMC.nc`) %>%
+  rename(date = time, precip = `2m_precip_HCMC.nc`) %>%
+  mutate(
+    date = as.Date(date) %>% yearweek(),
+    precip = precip * 1000,
+    scaled_precip = scale(precip)
+  ) %>%
+  as_tsibble()
+
+hcmc_precip_df %>%
+  ggplot(aes(x = date, y = precip)) +
+  geom_line() +
+  geom_smooth()
+
+hist(hcmc_precip_df$precip)
+
+hist(hcmc_precip_df$scaled_precip)
+```
+
 
 # Data transformation
 
@@ -317,20 +354,37 @@ accuracy(prophet_weekly_forecast, incidence_2019_weekly_df)
 
 ## SARIMAX
 
-```{r}
-train_weekly_t2m_df <- train_weekly_df %>% left_join(hcmc_temp_df, by = c("date_admitted" = "date"))
+SARIMAX - Seasonal Auto-Regressive Integrated Moving Average with eXogenous factors
 
-sarimax_fit <- train_weekly_t2m_df %>% model(
-  auto_arima = ARIMA(n ~ xreg(t2m) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
+### Model fitting
+
+```{r}
+train_weekly_weather_df <- train_weekly_df %>%
+  left_join(hcmc_temp_df, by = c("date_admitted" = "date")) %>%
+  left_join(hcmc_precip_df, by = c("date_admitted" = "date"))
+
+future::plan(future::multisession)
+
+sarimax_fits <- train_weekly_weather_df %>% model(
+  auto_arima_t2m = ARIMA(n ~ xreg(t2m) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
+  auto_arima_precip = ARIMA(n ~ xreg(precip) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
+  auto_arima_weather = ARIMA(n ~ xreg(precip, t2m) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
+  auto_arima_scaled_t2m = ARIMA(n ~ xreg(scaled_t2m) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
+  auto_arima_scaled_precip = ARIMA(n ~ xreg(scaled_precip) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
+  auto_arima_scaled_weather = ARIMA(n ~ xreg(scaled_precip, scaled_t2m) + pdq(2, 0, 1) + PDQ(1, 1, 0))
 )
+
+future::plan(future::sequential)
 ```
 
 ### Fit performance
 
-```{r}
-report(sarimax_fit)
+```{r warning=FALSE}
+report(sarimax_fits)
 
-accuracy(sarimax_fit)
+accuracy(sarimax_fits)
+
+sarimax_fit <- sarimax_fits %>% select(auto_arima_scaled_weather)
 
 # residuals
 sarimax_fit %>% gg_tsresiduals(lag = 104)
@@ -348,24 +402,48 @@ sarimax_fit %>%
   features(.innov, ljung_box, lag = min(2 * 52, nrow(train_weekly_df) / 5), dof = 3)
 ```
 
+```{r}
+fitted_sarimax_p <- fitted(sarimax_fit) %>%
+  autoplot() +
+  geom_line(
+    data = train_weekly_df,
+    mapping = aes(x = date_admitted, y = n),
+    color = "red", alpha = 0.7
+  )
+
+fitted_sarimax_p
+
+fitted_sarimax_p +
+  scale_x_yearweek(limits = c(as.Date("2018-01-01"), as.Date("2019-01-01")))
+```
+
+
 ### Forecasting
 
 ```{r}
+test_weekly_weather_df <- incidence_weekly_df %>%
+  left_join(
+    hcmc_temp_df,
+    by = c("date_admitted" = "date")
+  ) %>%
+  left_join(
+    hcmc_precip_df,
+    by = c("date_admitted" = "date")
+  ) %>%
+  filter(year(date_admitted) == 2019)
+
 forecasted_sarimax <- forecast(
-  sarimax_fit,
-  new_data = hcmc_temp_df %>% filter(year(date) == 2019),
-  h = 52
+  sarimax_fits,
+  new_data = test_weekly_weather_df
 )
 
-incidence_2019_weekly_df <- incidence_weekly_df %>%
-  filter(year(date_admitted) == 2019) %>%
-  rename(date = date_admitted)
-
 forecast_p <- forecasted_sarimax %>%
-  autoplot(incidence_2019_weekly_df) +
+  autoplot(test_weekly_weather_df) +
   scale_x_yearweek(date_breaks = "3 months", date_labels = "%b")
 
 forecast_p
 
-accuracy(forecasted_sarimax, incidence_2019_weekly_df)
+forecast_p + facet_wrap(~.model)
+
+accuracy(forecasted_sarimax, test_weekly_weather_df)
 ```
