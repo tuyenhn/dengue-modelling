@@ -1,0 +1,232 @@
+---
+output: 
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: journal
+---
+
+**Knitted at: `r Sys.time()`**
+
+# Library
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(magrittr)
+
+library(feasts)
+library(tsibble)
+library(fable.prophet)
+library(fabletools)
+library(fable)
+
+library(lubridate)
+
+library(ggdist)
+
+library(sf)
+library(stars)
+```
+
+# Data ingestion
+
+## Incidence data
+
+```{r}
+incidence_raw <- read_csv("../incidence_ts_in.csv", show_col_types = FALSE) %>%
+  mutate(date_admitted = as.Date(date_admitted)) %>%
+  as_tsibble(index = date_admitted) %>%
+  fill_gaps(n = 0)
+
+incidence_weekly_df <- incidence_raw %>%
+  index_by(agg = ~ yearweek(.)) %>%
+  summarise(n = sum(n)) %>%
+  rename(date_admitted = agg)
+
+train_weekly_df <- incidence_weekly_df %>%
+  filter(year(date_admitted) < 2019)
+
+ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
+  geom_line()
+```
+
+## HCMC shape
+
+```{r}
+hcmc_shp <- read_rds("../gadm/gadm41_VNM_1_pk.rds") %>%
+  terra::unwrap() %>%
+  st_as_sf() %>%
+  filter(GID_1 == "VNM.25_1")
+
+hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
+```
+
+## Temperature data
+
+Temperature data information: ![](temp_era5_req.png)
+
+```{r}
+hcmc_temp_df <- read_stars("../2m_temp_HCMC.nc") %>%
+  st_set_crs(4326) %>%
+  aggregate("1 week", FUN = mean) %>%
+  aggregate(hcmc_shp_w_buff, FUN = mean) %>%
+  as_tibble() %>%
+  select(time, `2m_temp_HCMC.nc`) %>%
+  rename(date = time, t2m = `2m_temp_HCMC.nc`) %>%
+  mutate(
+    date = as.Date(date) %>% yearweek(),
+    t2m = t2m - 273.15,
+    scaled_t2m = scale(t2m) %>% as.double()
+  ) %>%
+  as_tsibble()
+
+hcmc_temp_df %>%
+  ggplot(aes(x = date, y = t2m)) +
+  geom_line() +
+  geom_smooth()
+
+hist(hcmc_temp_df$t2m)
+
+hist(hcmc_temp_df$scaled_t2m)
+```
+
+## Precipitation data
+
+```{r}
+hcmc_precip_df <- read_stars("../2m_precip_HCMC.nc") %>%
+  st_set_crs(4326) %>%
+  aggregate("1 week", FUN = sum) %>%
+  aggregate(hcmc_shp_w_buff, FUN = sum) %>%
+  as_tibble() %>%
+  select(time, `2m_precip_HCMC.nc`) %>%
+  rename(date = time, precip = `2m_precip_HCMC.nc`) %>%
+  mutate(
+    date = as.Date(date) %>% yearweek(),
+    precip = precip * 1000,
+    scaled_precip = scale(precip) %>% as.double()
+  ) %>%
+  as_tsibble()
+
+hcmc_precip_df %>%
+  ggplot(aes(x = date, y = precip)) +
+  geom_line() +
+  geom_smooth()
+
+hist(hcmc_precip_df$precip)
+
+hist(hcmc_precip_df$scaled_precip)
+```
+
+```{r}
+train_weekly_weather_df <- train_weekly_df %>%
+  left_join(hcmc_temp_df, by = c("date_admitted" = "date")) %>%
+  left_join(hcmc_precip_df, by = c("date_admitted" = "date"))
+
+incidence_2019_weekly_df <- incidence_weekly_df %>%
+  left_join(hcmc_temp_df, by = c("date_admitted" = "date")) %>%
+  left_join(hcmc_precip_df, by = c("date_admitted" = "date")) %>%
+  filter(year(date_admitted) == 2019)
+```
+
+# Correlation analysis
+
+## CCF
+
+```{r}
+train_weekly_weather_df %>%
+  CCF(n, scaled_t2m) %>%
+  autoplot()
+
+train_weekly_weather_df %>%
+  CCF(n, scaled_precip) %>%
+  autoplot()
+
+train_weekly_weather_df %>%
+  CCF(n, date_admitted) %>%
+  autoplot()
+```
+
+```{r}
+```
+
+
+# Modelling
+
+```{r}
+fit_perf <- function(fit) {
+  print(summary(fit))
+
+  fitted <- fitted(fit)
+
+  fitted %>% plot(type = "l")
+
+  actual <- train_weekly_weather_df$n
+
+  print(sprintf(
+    "Train RMSE: %f",
+    sqrt(mean((actual - fitted)^2))
+  ))
+  print(sprintf(
+    "Train MAE: %f",
+    mean(abs(actual - fitted))
+  ))
+
+  print(train_weekly_weather_df %>%
+    mutate(fitted = fitted) %>%
+    ggplot(aes(x = date_admitted)) +
+    geom_line(aes(y = n)) +
+    geom_line(aes(y = fitted), color = "red"))
+}
+
+forecast_perf <- function(forecast) {
+  forecast %>% plot(type = "l")
+
+  actual <- log(incidence_2019_weekly_df$n)
+
+  print(sprintf(
+    "Test RMSE: %f",
+    sqrt(mean((actual - forecast)^2))
+  ))
+  print(sprintf(
+    "Test MAE: %f",
+    mean(abs(actual - forecast))
+  ))
+
+
+  print(incidence_2019_weekly_df %>%
+    mutate(forecast = forecast) %>%
+    ggplot(aes(x = date_admitted)) +
+    geom_line(aes(y = log(n))) +
+    geom_line(aes(y = forecast), color = "red"))
+}
+```
+
+
+## Poisson
+
+```{r}
+poisson_fit <- glm(
+  n ~ date_admitted + scaled_t2m + scaled_precip,
+  family = poisson(), data = train_weekly_weather_df
+)
+
+fit_perf(poisson_fit)
+
+poisson_forecast <- predict(poisson_fit, newdata = incidence_2019_weekly_df)
+
+forecast_perf(poisson_forecast)
+```
+
+```{r}
+nb_fit <- MASS::glm.nb(
+  n ~ date_admitted + scaled_t2m + scaled_precip,
+  data = train_weekly_weather_df
+)
+
+fit_perf(nb_fit)
+
+
+nb_forecast <- predict(nb_fit, newdata = incidence_2019_weekly_df)
+
+forecast_perf(nb_forecast)
+```
