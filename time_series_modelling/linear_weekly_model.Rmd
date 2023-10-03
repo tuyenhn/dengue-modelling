@@ -119,7 +119,66 @@ hist(hcmc_precip_df$scaled_precip)
 ```
 
 
-# Data transformation
+# Time series analysis
+
+## STL Decomposition
+
+```{r}
+incidence_weekly_df %>%
+  model(
+    stl_decomp = STL(log(n) ~ season(period = 52, window = "periodic"), robust = TRUE)
+  ) %>%
+  components() %>%
+  autoplot()
+```
+
+
+## Homoscedasticity
+
+```{r}
+skedastic::white(lm(n ~ date_admitted, data = train_weekly_df))
+```
+
+```{r}
+boxcox_mle <- unclass(MASS::boxcox(lm(train_weekly_df$n ~ 1))) %>% as_tibble()
+
+boxcox_white_df <- map(boxcox_mle$x, \(lambda) {
+  tibble(
+    lambda = lambda,
+    transformed_x = list(box_cox(train_weekly_df$n, lambda)),
+    white_pvalue = skedastic::white(
+      lm(unlist(transformed_x) ~ train_weekly_df$date_admitted)
+    )$p.value
+  )
+}) %>%
+  list_c()
+
+boxcox_white_df %>%
+  left_join(boxcox_mle, by = c("lambda" = "x")) %>%
+  ggplot(aes(x = lambda)) +
+  geom_line(aes(y = white_pvalue), color = "red") +
+  geom_line(aes(y = (y - min(y)) / 50000), color = "blue") +
+  scale_y_continuous(
+    "White test p-value",
+    sec.axis = sec_axis(trans = ~ . * 50000 + min(boxcox_mle$y), name = "log-Likelihood")
+  )
+```
+
+```{r}
+white_lambda <- boxcox_white_df %>%
+  filter(white_pvalue == max(white_pvalue)) %>%
+  pull(lambda)
+boxcox_lambda <- boxcox_mle %>%
+  filter(y == max(y)) %>%
+  pull(x)
+guerrero_lambda <- train_weekly_df %>%
+  features(n, features = guerrero) %>%
+  pull(lambda_guerrero)
+
+white_lambda
+boxcox_lambda
+guerrero_lambda
+```
 
 ## Log transformation
 
