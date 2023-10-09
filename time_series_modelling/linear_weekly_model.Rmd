@@ -228,7 +228,7 @@ sarima_fits <- train_weekly_df %>% model(
   auto_arima = ARIMA(n ~ pdq(2, 0, 1) + PDQ(1, 1, 0)),
 
   # same as auto_arima but with non-seasonal differencing
-  arima_211110 = ARIMA(n ~ pdq(2, 1, 1) + PDQ(1, 1, 0))
+  arima_211110 = ARIMA(n ~ pdq(2, 1, 1) + PDQ(1, 1, 0)),
 )
 
 future::plan(future::sequential())
@@ -261,13 +261,15 @@ sarima_fits %>%
 ### Forecast
 
 ```{r}
-forecasted_sarima <- forecast(sarima_fits, h = 52)
+forecasted_sarima <- forecast(sarima_fits, h = 4)
 
-incidence_2019_weekly_df <- incidence_weekly_df %>% filter(year(date_admitted) == 2019)
+incidence_2019_weekly_df <- incidence_weekly_df %>%
+  filter(year(date_admitted) == 2019) %>%
+  head(4)
 
 forecast_p <- forecasted_sarima %>%
   autoplot(incidence_2019_weekly_df) +
-  scale_x_yearweek(date_breaks = "3 months", date_labels = "%b")
+  scale_x_yearweek(date_breaks = "1 week", date_labels = "W%V-%Y")
 
 forecast_p + facet_wrap(~.model)
 ```
@@ -279,11 +281,11 @@ forecasted_sarima %>% accuracy(incidence_2019_weekly_df)
 ## SARIMA one-week-ahead
 
 ```{r}
-fit <- sarima_fits %>% select(auto_arima)
+fit <- sarima_fits %>% select(arima_211110)
 
 forecast_1w_df <- train_weekly_df %>% mutate(ci = NA)
 
-for (i in 1:52) {
+for (i in 1:4) {
   forecasted_1w <- fit %>%
     forecast(h = 1) %>%
     as_tibble() %>%
@@ -308,7 +310,7 @@ ggplot(mapping = aes(x = date_admitted)) +
     aes(y = n)
   ) +
   scale_fill_brewer() +
-  scale_x_yearweek(limit = c(as.Date("2018-01-01"), as.Date("2020-01-01")))
+  scale_x_yearweek(limit = c(as.Date("2018-12-01"), as.Date("2019-02-01")))
 ```
 
 ### Accuracy
@@ -316,9 +318,11 @@ ggplot(mapping = aes(x = date_admitted)) +
 ```{r}
 actual <- incidence_weekly_df %>%
   filter(year(date_admitted) == 2019) %>%
+  head(4) %>%
   pull(n)
 forecasted <- forecast_1w_df %>%
   filter(year(date_admitted) == 2019) %>%
+  head(4) %>%
   pull(n)
 
 sprintf(
@@ -341,11 +345,11 @@ prophet_weekly <- train_weekly_df %>%
   )
 
 prophet_weekly_forecast <- prophet_weekly %>%
-  forecast(h = 52)
+  forecast(h = 4)
 
 prophet_forecast_p <- prophet_weekly_forecast %>%
   autoplot(incidence_2019_weekly_df) +
-  scale_x_yearweek(date_breaks = "3 months", date_labels = "%b")
+  scale_x_yearweek(date_breaks = "1 week", date_labels = "W%V-%Y")
 
 prophet_forecast_p
 prophet_forecast_p + facet_wrap(~.model)
@@ -356,9 +360,6 @@ accuracy(prophet_weekly_forecast, incidence_2019_weekly_df)
 ### With holidays
 
 ```{r fig.height=15, fig.width=15, warning=FALSE}
-lunR::lunar_to_gregorian("2001-12-29")
-
-
 pub_holidays <- map(2000:2022, \(year){
   c(
     sprintf("%d-01-01", year),
@@ -402,7 +403,7 @@ prophet_weekly_w_holiday <- train_weekly_df %>%
   )
 
 prophet_weekly_forecast <- prophet_weekly_w_holiday %>%
-  forecast(h = 52)
+  forecast(h = 4)
 
 prophet_weekly_forecast %>%
   autoplot(incidence_2019_weekly_df) +
@@ -425,12 +426,20 @@ train_weekly_weather_df <- train_weekly_df %>%
 future::plan(future::multisession)
 
 sarimax_fits <- train_weekly_weather_df %>% model(
-  auto_arima_t2m = ARIMA(n ~ xreg(t2m) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
-  auto_arima_precip = ARIMA(n ~ xreg(precip) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
+  # raw covariables
+  arima_211110_t2m = ARIMA(n ~ xreg(t2m) + pdq(2, 1, 1) + PDQ(1, 1, 0)),
+  arima_211110_precip = ARIMA(n ~ xreg(precip) + pdq(2, 1, 1) + PDQ(1, 1, 0)),
+
+  # unit root issues so this model will be auto_arima
   auto_arima_weather = ARIMA(n ~ xreg(precip, t2m) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
-  auto_arima_scaled_t2m = ARIMA(n ~ xreg(scaled_t2m) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
-  auto_arima_scaled_precip = ARIMA(n ~ xreg(scaled_precip) + pdq(2, 0, 1) + PDQ(1, 1, 0)),
-  auto_arima_scaled_weather = ARIMA(n ~ xreg(scaled_precip, scaled_t2m) + pdq(2, 0, 1) + PDQ(1, 1, 0))
+
+  # scaled covariables
+  arima_211110_scaled_t2m = ARIMA(n ~ xreg(scaled_t2m) + pdq(2, 1, 1) + PDQ(1, 1, 0)),
+  arima_211110_scaled_precip = ARIMA(n ~ xreg(scaled_precip) + pdq(2, 1, 1) + PDQ(1, 1, 0)),
+  arima_211110_scaled_weather = ARIMA(n ~ xreg(scaled_precip, scaled_t2m) + pdq(2, 1, 1) + PDQ(1, 1, 0)),
+
+  # mix of both
+  arima_211110_mixed_st2m_rprecip = ARIMA(n ~ xreg(scaled_t2m, precip) + pdq(2, 1, 1) + PDQ(1, 1, 0)),
 )
 
 future::plan(future::sequential)
@@ -443,7 +452,7 @@ report(sarimax_fits)
 
 accuracy(sarimax_fits)
 
-sarimax_fit <- sarimax_fits %>% select(auto_arima_scaled_weather)
+sarimax_fit <- sarimax_fits %>% select(arima_211110_scaled_weather)
 
 # residuals
 sarimax_fit %>% gg_tsresiduals(lag = 104)
@@ -489,7 +498,8 @@ test_weekly_weather_df <- incidence_weekly_df %>%
     hcmc_precip_df,
     by = c("date_admitted" = "date")
   ) %>%
-  filter(year(date_admitted) == 2019)
+  filter(year(date_admitted) == 2019) %>%
+  head(4)
 
 forecasted_sarimax <- forecast(
   sarimax_fits,
@@ -498,11 +508,68 @@ forecasted_sarimax <- forecast(
 
 forecast_p <- forecasted_sarimax %>%
   autoplot(test_weekly_weather_df) +
-  scale_x_yearweek(date_breaks = "3 months", date_labels = "%b")
+  scale_x_yearweek("Date", date_breaks = "1 week", date_labels = "W%V-%Y") +
+  scale_y_continuous("Incidence (log10-transformed)") + scale_alpha_continuous("Confidence interval")
 
 forecast_p
 
 forecast_p + facet_wrap(~.model)
 
 accuracy(forecasted_sarimax, test_weekly_weather_df)
+
+ggsave("sarimax_4w_forecasts.png", width = 10, height = 7)
+```
+
+#### One-week-ahead
+
+```{r}
+fit <- sarimax_fits %>% select(arima_211110_precip)
+
+forecast_1w_weather_df <- train_weekly_weather_df %>% mutate(ci = NA)
+
+for (i in 1:4) {
+  forecasted_1w <- fit %>%
+    forecast(new_data = test_weekly_weather_df %>% head(i) %>% tail(1)) %>%
+    as_tibble() %>%
+    select(date_admitted, .mean, n) %>%
+    rename(ci = n, n = .mean)
+
+  forecast_1w_weather_df %<>% tail(-1) %>% bind_rows(forecasted_1w)
+
+  fit %<>% refit(forecast_1w_weather_df, reestimate = FALSE)
+}
+
+ggplot(mapping = aes(x = date_admitted)) +
+  stat_lineribbon(
+    data = forecast_1w_weather_df,
+    aes(ydist = ci),
+    linewidth = .5,
+    .width = c(0.8, 0.95),
+    color = "blue"
+  ) +
+  geom_line(
+    data = test_weekly_weather_df,
+    aes(y = n)
+  ) +
+  scale_fill_brewer() +
+  scale_x_yearweek(limit = c(as.Date("2018-12-01"), as.Date("2019-02-01")))
+
+### Accuracy
+actual <- incidence_weekly_df %>%
+  filter(year(date_admitted) == 2019) %>%
+  head(4) %>%
+  pull(n)
+forecasted <- forecast_1w_df %>%
+  filter(year(date_admitted) == 2019) %>%
+  head(4) %>%
+  pull(n)
+
+sprintf(
+  "RMSE: %f",
+  sqrt(mean((actual - forecasted)^2))
+)
+sprintf(
+  "MAE: %f",
+  mean(abs(actual - forecasted))
+)
 ```
