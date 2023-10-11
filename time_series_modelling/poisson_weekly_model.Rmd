@@ -28,6 +28,11 @@ library(sf)
 library(stars)
 ```
 
+```{r}
+theme_set(theme_bw())
+```
+
+
 # Data ingestion
 
 ## Incidence data
@@ -61,18 +66,24 @@ hcmc_shp <- read_rds("../gadm/gadm41_VNM_1_pk.rds") %>%
 hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
 ```
 
-## Temperature data
+## Weather data
 
-Temperature data information: ![](temp_era5_req.png)
+Data information: ![](era5_req.png)
+```{r}
+raw_weather <- read_stars("../t2m_precip_1999_2023_HCMC.nc") %>%
+  st_set_crs(4326)
+```
+
+### Temperature data
 
 ```{r}
-hcmc_temp_df <- read_stars("../2m_temp_HCMC.nc") %>%
-  st_set_crs(4326) %>%
+hcmc_temp_df <- raw_weather %>%
+  select(t2m) %>%
   aggregate("1 week", FUN = mean) %>%
   aggregate(hcmc_shp_w_buff, FUN = mean) %>%
   as_tibble() %>%
-  select(time, `2m_temp_HCMC.nc`) %>%
-  rename(date = time, t2m = `2m_temp_HCMC.nc`) %>%
+  select(time, t2m) %>%
+  rename(date = time) %>%
   mutate(
     date = as.Date(date) %>% yearweek(),
     t2m = t2m - 273.15,
@@ -83,23 +94,28 @@ hcmc_temp_df <- read_stars("../2m_temp_HCMC.nc") %>%
 hcmc_temp_df %>%
   ggplot(aes(x = date, y = t2m)) +
   geom_line() +
-  geom_smooth()
+  geom_smooth() +
+  scale_x_yearweek("Week") +
+  scale_y_continuous("2m temperature") +
+  ggtitle("Weekly 2m temperature ERA5 reanalysis")
+
+ggsave("weekly_t2m_ts.svg", width = 10, height = 7)
 
 hist(hcmc_temp_df$t2m)
 
 hist(hcmc_temp_df$scaled_t2m)
 ```
 
-## Precipitation data
+### Precipitation data
 
 ```{r}
-hcmc_precip_df <- read_stars("../2m_precip_HCMC.nc") %>%
-  st_set_crs(4326) %>%
+hcmc_precip_df <- raw_weather %>%
+  select(tp) %>%
   aggregate("1 week", FUN = sum) %>%
   aggregate(hcmc_shp_w_buff, FUN = sum) %>%
   as_tibble() %>%
-  select(time, `2m_precip_HCMC.nc`) %>%
-  rename(date = time, precip = `2m_precip_HCMC.nc`) %>%
+  select(time, tp) %>%
+  rename(date = time, precip = tp) %>%
   mutate(
     date = as.Date(date) %>% yearweek(),
     precip = precip * 1000,
@@ -110,7 +126,12 @@ hcmc_precip_df <- read_stars("../2m_precip_HCMC.nc") %>%
 hcmc_precip_df %>%
   ggplot(aes(x = date, y = precip)) +
   geom_line() +
-  geom_smooth()
+  geom_smooth() +
+  scale_x_yearweek("Week") +
+  scale_y_continuous("Total precipitation") +
+  ggtitle("Weekly Total precipitation ERA5 reanalysis")
+
+ggsave("weekly_precip_ts.svg", width = 10, height = 7)
 
 hist(hcmc_precip_df$precip)
 
