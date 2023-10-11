@@ -1,0 +1,236 @@
+---
+title: "Dengue daily incidence modelling"
+output: 
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: journal
+---
+
+**Knitted at: `r Sys.time()`**
+
+# Libraries
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(magrittr)
+
+library(feasts)
+library(tsibble)
+library(fable.prophet)
+library(fabletools)
+library(fable)
+
+library(lubridate)
+
+library(ggdist)
+
+library(sf)
+library(stars)
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(dev = "svg") # set output device to svg
+```
+
+
+# Data ingestion
+
+## Incidence data
+
+```{r}
+incidence_daily_df <- read_csv("../incidence_ts_in.csv", show_col_types = FALSE) %>%
+  mutate(date_admitted = as.Date(date_admitted)) %>%
+  as_tsibble(index = date_admitted) %>%
+  fill_gaps(n = 0)
+
+train_daily_df <- incidence_daily_df %>%
+  filter(year(date_admitted) < 2019)
+
+ggplot(incidence_daily_df, aes(x = date_admitted, y = n)) +
+  geom_line() +
+  scale_x_date("Date of admission (daily)") +
+  scale_y_continuous("Case admitted") +
+  theme_bw()
+
+
+ggsave("daily_incidence_ts.svg", height = 7, width = 12)
+```
+
+## HCMC shape
+
+```{r}
+# hcmc_shp <- read_rds("../gadm/gadm41_VNM_1_pk.rds") %>%
+#   terra::unwrap() %>%
+#   st_as_sf() %>%
+#   filter(GID_1 == "VNM.25_1")
+#
+# hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
+```
+
+## Temperature data
+
+Temperature data information: ![](temp_era5_req.png)
+
+```{r}
+# hcmc_temp_df <- read_stars("../2m_temp_HCMC.nc") %>%
+#   st_set_crs(4326) %>%
+#   aggregate("1 week", FUN = mean) %>%
+#   aggregate(hcmc_shp_w_buff, FUN = mean) %>%
+#   as_tibble() %>%
+#   select(time, `2m_temp_HCMC.nc`) %>%
+#   rename(date = time, t2m = `2m_temp_HCMC.nc`) %>%
+#   mutate(
+#     date = as.Date(date) %>% yearweek(),
+#     t2m = t2m - 273.15,
+#     scaled_t2m = scale(t2m)
+#   ) %>%
+#   as_tsibble()
+#
+# hcmc_temp_df %>%
+#   ggplot(aes(x = date, y = t2m)) +
+#   geom_line() +
+#   geom_smooth()
+#
+# hist(hcmc_temp_df$t2m)
+#
+# hist(hcmc_temp_df$scaled_t2m)
+```
+
+## Precipitation data
+
+```{r}
+# hcmc_precip_df <- read_stars("../2m_precip_HCMC.nc") %>%
+#   st_set_crs(4326) %>%
+#   aggregate("1 week", FUN = sum) %>%
+#   aggregate(hcmc_shp_w_buff, FUN = sum) %>%
+#   as_tibble() %>%
+#   select(time, `2m_precip_HCMC.nc`) %>%
+#   rename(date = time, precip = `2m_precip_HCMC.nc`) %>%
+#   mutate(
+#     date = as.Date(date) %>% yearweek(),
+#     precip = precip * 1000,
+#     scaled_precip = scale(precip)
+#   ) %>%
+#   as_tsibble()
+#
+# hcmc_precip_df %>%
+#   ggplot(aes(x = date, y = precip)) +
+#   geom_line() +
+#   geom_smooth()
+#
+# hist(hcmc_precip_df$precip)
+#
+# hist(hcmc_precip_df$scaled_precip)
+```
+
+# Daily models
+
+### Differencing
+
+Quickly check if any differencing needed, both seasonal and non-seasonal
+
+```{r}
+incidence_daily_df %>% features(n, unitroot_ndiffs)
+incidence_daily_df %>% features(n, unitroot_nsdiffs)
+
+train_daily_decomp_seasonal <- incidence_daily_df %>%
+  model(decomp = classical_decomposition(n, type = "multiplicative")) %>%
+  components() %>%
+  pull(seasonal)
+
+incidence_daily_df %>%
+  mutate(n = n - train_daily_decomp_seasonal, n = difference(n)) %>%
+  pull(n) %>%
+  sample(5000) %>%
+  shapiro.test()
+```
+
+```{r}
+incidence_daily_df %>%
+  mutate(n = n - train_daily_decomp_seasonal, n = difference(n)) %>%
+  pull(n) %>%
+  hist()
+
+incidence_daily_df %>%
+  mutate(n = difference(n)) %>%
+  pull(n) %>%
+  sample(5000) %>%
+  shapiro.test()
+```
+
+
+```{r}
+incidence_daily_df %>%
+  gg_tsdisplay(
+    difference(n),
+    plot_type = "partial",
+    lag = 365
+  )
+
+incidence_daily_df %>%
+  gg_tsdisplay(
+    difference(n, 365),
+    plot_type = "partial",
+    lag = 730
+  )
+```
+
+
+### Model fitting
+
+```{r}
+future::plan(future::multisession)
+
+sarima_fits <- train_daily_df %>% model(
+  auto_arima = ARIMA(n ~ pdq(1, 1, 2) + PDQ(0, 0, 2)),
+)
+
+future::plan(future::sequential())
+```
+
+
+
+```{r}
+report(sarima_fits)
+
+sarima_fits %>% pivot_longer(everything(),
+  names_to = "Model name",
+  values_to = "Orders"
+)
+
+accuracy(sarima_fits)
+
+fit <- sarima_fits %>% select(auto_arima)
+
+# residuals
+fit %>% gg_tsresiduals(lag = 104)
+
+fit_resid <- fit %>%
+  residuals() %>%
+  as_tibble()
+
+shapiro.test(fit_resid$.resid %>% sample(5000))
+skedastic::white(lm(.resid ~ date_admitted, data = fit_resid))
+```
+
+
+### Forecast
+
+```{r}
+forecasted_sarima <- forecast(sarima_fits, h = 28)
+
+incidence_2019_daily_df <- incidence_daily_df %>%
+  filter_index("2018-12-14" ~ "2019-02")
+
+forecast_p <- forecasted_sarima %>%
+  autoplot(incidence_2019_daily_df) +
+  scale_x_yearweek(date_breaks = "2 weeks", date_labels = "W%V-%Y")
+
+forecast_p + facet_wrap(~.model, ncol = 1)
+```
+
+```{r}
+forecasted_sarima %>% accuracy(incidence_2019_daily_df)
+```
