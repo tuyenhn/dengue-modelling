@@ -1,0 +1,291 @@
+---
+output: 
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: journal
+---
+
+**Knitted at: `r Sys.time()`**
+
+# Library
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(magrittr)
+
+library(feasts)
+library(tsibble)
+library(fable.prophet)
+library(fabletools)
+library(fable)
+
+library(lubridate)
+
+library(ggdist)
+
+library(sf)
+library(stars)
+```
+
+```{r}
+theme_set(theme_bw())
+```
+
+
+# Data ingestion
+
+## Incidence data
+
+```{r}
+incidence_raw <- read_csv("../incidence_ts_in.csv", show_col_types = FALSE) %>%
+  mutate(date_admitted = as.Date(date_admitted)) %>%
+  as_tsibble(index = date_admitted) %>%
+  fill_gaps(n = 0)
+
+incidence_weekly_df <- incidence_raw %>%
+  index_by(agg = ~ yearweek(.)) %>%
+  summarise(n = sum(n)) %>%
+  rename(date_admitted = agg)
+
+train_weekly_df <- incidence_weekly_df %>%
+  filter(year(date_admitted) < 2019)
+
+ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
+  geom_line()
+```
+
+## HCMC shape
+
+```{r}
+hcmc_shp <- read_rds("../gadm/gadm41_VNM_1_pk.rds") %>%
+  terra::unwrap() %>%
+  st_as_sf() %>%
+  filter(GID_1 == "VNM.25_1")
+
+hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
+```
+
+## Weather data
+
+Data information: ![](era5_req.png)
+```{r}
+raw_weather <- read_stars("../t2m_precip_1999_2023_HCMC.nc") %>%
+  st_set_crs(4326)
+```
+
+### Temperature data
+
+```{r}
+hcmc_temp_df <- raw_weather %>%
+  select(t2m) %>%
+  aggregate("1 week", FUN = mean) %>%
+  aggregate(hcmc_shp_w_buff, FUN = mean) %>%
+  as_tibble() %>%
+  select(time, t2m) %>%
+  rename(date = time) %>%
+  mutate(
+    date = as.Date(date) %>% yearweek(),
+    t2m = t2m - 273.15,
+    scaled_t2m = scale(t2m) %>% as.double()
+  ) %>%
+  as_tsibble()
+
+hcmc_temp_df %>%
+  ggplot(aes(x = date, y = t2m)) +
+  geom_line() +
+  geom_smooth() +
+  scale_x_yearweek("Week") +
+  scale_y_continuous("2m temperature") +
+  ggtitle("Weekly 2m temperature ERA5 reanalysis")
+
+ggsave("weekly_t2m_ts.svg", width = 10, height = 7)
+
+hist(hcmc_temp_df$t2m)
+
+hist(hcmc_temp_df$scaled_t2m)
+```
+
+### Precipitation data
+
+```{r}
+hcmc_precip_df <- raw_weather %>%
+  select(tp) %>%
+  aggregate("1 week", FUN = sum) %>%
+  aggregate(hcmc_shp_w_buff, FUN = sum) %>%
+  as_tibble() %>%
+  select(time, tp) %>%
+  rename(date = time, precip = tp) %>%
+  mutate(
+    date = as.Date(date) %>% yearweek(),
+    precip = precip * 1000,
+    scaled_precip = scale(precip) %>% as.double()
+  ) %>%
+  as_tsibble()
+
+hcmc_precip_df %>%
+  ggplot(aes(x = date, y = precip)) +
+  geom_line() +
+  geom_smooth() +
+  scale_x_yearweek("Week") +
+  scale_y_continuous("Total precipitation") +
+  ggtitle("Weekly Total precipitation ERA5 reanalysis")
+
+ggsave("weekly_precip_ts.svg", width = 10, height = 7)
+
+hist(hcmc_precip_df$precip)
+
+hist(hcmc_precip_df$scaled_precip)
+```
+
+```{r}
+train_weekly_weather_df <- train_weekly_df %>%
+  left_join(hcmc_temp_df, by = c("date_admitted" = "date")) %>%
+  left_join(hcmc_precip_df, by = c("date_admitted" = "date"))
+
+test_weekly_df <- incidence_weekly_df %>%
+  left_join(hcmc_temp_df, by = c("date_admitted" = "date")) %>%
+  left_join(hcmc_precip_df, by = c("date_admitted" = "date")) %>%
+  filter(year(date_admitted) == 2019) %>%
+  head(4)
+```
+
+# Modelling
+
+## Performance
+
+
+```{r}
+fit_perf <- function(fit, actual) {
+  print(summary(fit))
+
+  fitted <- fitted(fit)
+
+  fitted %>% plot(type = "l")
+
+  print(sprintf(
+    "Train RMSE: %f",
+    sqrt(mean((actual - fitted)^2))
+  ))
+  print(sprintf(
+    "Train MAE: %f",
+    mean(abs(actual - fitted))
+  ))
+
+  print(train_weekly_weather_df %>%
+    mutate(fitted = fitted) %>%
+    ggplot(aes(x = date_admitted)) +
+    geom_line(aes(y = n)) +
+    geom_line(aes(y = fitted), color = "red"))
+}
+
+forecast_perf <- function(forecast, actual) {
+  forecast %>% plot(type = "l")
+
+  print(sprintf(
+    "Test RMSE: %f",
+    sqrt(mean((actual - forecast)^2))
+  ))
+  print(sprintf(
+    "Test MAE: %f",
+    mean(abs(actual - forecast))
+  ))
+
+
+  print(test_weekly_df %>%
+    mutate(forecast = forecast) %>%
+    ggplot(aes(x = date_admitted)) +
+    geom_line(aes(y = n)) +
+    geom_line(aes(y = forecast), color = "red"))
+}
+```
+
+
+
+## Mean
+
+```{r}
+mean_fit <- train_weekly_df %>% model(MEAN(n))
+mean_fitted <- fitted(mean_fit)$.fitted[[1]]
+
+mean_fit %>%
+  forecast(h = 4) %>%
+  autoplot(incidence_weekly_df) +
+  geom_segment(
+    aes(
+      x = as.Date("2018-01-01"), xend = as.Date("2019-01-01"),
+      y = mean_fitted, yend = mean_fitted
+    ),
+    color = "blue", linetype = "dashed", linewidth = 0.3
+  ) +
+  scale_x_yearweek("Week", limits = c(as.Date("2018-01-01"), as.Date("2019-02-01"))) +
+  scale_y_continuous("Incidence") +
+  ggtitle("4 week forecast - MEAN")
+
+ggsave("forecast_mean_4w.svg", width = 10, height = 7)
+
+forecast_perf(
+  mean_fit %>% forecast(h = 4) %>% as_tibble() %>% pull(.mean),
+  test_weekly_df %>% pull(n)
+)
+```
+
+## NAIVE
+
+```{r}
+naive_fit <- train_weekly_df %>% model(NAIVE(n))
+
+naive_fit %>%
+  forecast(h = 4) %>%
+  autoplot(incidence_weekly_df) +
+  scale_x_yearweek("Week", limits = c(as.Date("2018-01-01"), as.Date("2019-02-01"))) +
+  scale_y_continuous("Incidence") +
+  ggtitle("4 week forecast - NAIVE")
+
+ggsave("forecast_naive_4w.svg", width = 10, height = 7)
+
+forecast_perf(
+  naive_fit %>% forecast(h = 4) %>% as_tibble() %>% pull(.mean),
+  test_weekly_df %>% pull(n)
+)
+```
+
+## SNAIVE
+
+```{r}
+snaive_fit <- train_weekly_df %>% model(SNAIVE(n))
+
+snaive_fit %>%
+  forecast(h = 4) %>%
+  autoplot(incidence_weekly_df) +
+  scale_x_yearweek("Week", limits = c(as.Date("2018-01-01"), as.Date("2019-02-01"))) +
+  scale_y_continuous("Incidence") +
+  ggtitle("4 week forecast - SNAIVE")
+
+ggsave("forecast_snaive_4w.svg", width = 10, height = 7)
+
+forecast_perf(
+  snaive_fit %>% forecast(h = 4) %>% as_tibble() %>% pull(.mean),
+  test_weekly_df %>% pull(n)
+)
+```
+
+## Drift
+
+```{r}
+drift_fit <- train_weekly_df %>% model(RW(n ~ drift()))
+
+drift_fit %>%
+  forecast(h = 4) %>%
+  autoplot(incidence_weekly_df) +
+  scale_x_yearweek("Week", limits = c(as.Date("2018-01-01"), as.Date("2019-02-01"))) +
+  scale_y_continuous("Incidence") +
+  ggtitle("4 week forecast - SNAIVE")
+
+ggsave("forecast_drift_4w.svg", width = 10, height = 7)
+
+forecast_perf(
+  drift_fit %>% forecast(h = 4) %>% as_tibble() %>% pull(.mean),
+  test_weekly_df %>% pull(n)
+)
+```
