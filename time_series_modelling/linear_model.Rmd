@@ -20,6 +20,10 @@ library(lubridate)
 library(ggdist)
 ```
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(dev = "svg") # set output device to svg
+```
+
 # Data ingestion
 
 ## Incidence data
@@ -43,9 +47,13 @@ train_monthly_df <- incidence_monthly_df %>%
 
 ```{r}
 p_base <- ggplot(train_monthly_df, aes(x = date_admitted)) +
-  scale_x_yearmonth(date_labels = "%Y", date_breaks = "2 years")
+  scale_x_yearmonth("Month of admission", date_labels = "%Y", date_breaks = "2 years") +
+  scale_y_continuous("Case admitted") +
+  theme_bw()
 
-p_base + geom_line(aes(y = n))
+p_base + geom_line(aes(y = n)) + ggtitle("Dengue monthly incidence")
+
+ggsave("monthly_incidence_ts.svg", height = 7, width = 12)
 ```
 
 ARIMA is based on the assumption that the time series is homoscedastic (has constant variance). We can use the White test (White, 1980), to check this. If the time series is not homoscedastic (heteroscedastic), we will perform a Box-Cox transformation.
