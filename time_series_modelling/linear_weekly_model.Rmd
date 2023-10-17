@@ -31,27 +31,20 @@ library(stars)
 
 # Settings
 ```{r}
-# theme_set(ggthemes::)
+theme_set(theme_bw())
 ```
 
+
 # Data ingestion
+
+```{r}
+source("./data_weekly.R")
+```
+
 
 ## Incidence data
 
 ```{r}
-incidence_raw <- read_csv("../incidence_ts_in.csv", show_col_types = FALSE) %>%
-  mutate(date_admitted = as.Date(date_admitted)) %>%
-  as_tsibble(index = date_admitted) %>%
-  fill_gaps(n = 0)
-
-incidence_weekly_df <- incidence_raw %>%
-  index_by(agg = ~ yearweek(.)) %>%
-  summarise(n = sum(n)) %>%
-  rename(date_admitted = agg)
-
-train_weekly_df <- incidence_weekly_df %>%
-  filter(year(date_admitted) < 2019)
-
 ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
   geom_line()
 ```
@@ -59,70 +52,56 @@ ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
 ## HCMC shape
 
 ```{r}
-hcmc_shp <- read_rds("../gadm/gadm41_VNM_1_pk.rds") %>%
-  terra::unwrap() %>%
-  st_as_sf() %>%
-  filter(GID_1 == "VNM.25_1")
-
-hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
+ggplot() +
+  geom_sf(data = hcmc_shp_w_buff) +
+  geom_sf(data = hcmc_shp)
 ```
 
-## Temperature data
+## Weather data
 
-Temperature data information: ![](temp_era5_req.png)
+Data information: ![](era5_req.png)
+```{r}
+raw_weather
+```
+
+### Temperature data
 
 ```{r}
-hcmc_temp_df <- read_stars("../2m_temp_HCMC.nc") %>%
-  st_set_crs(4326) %>%
-  aggregate("1 week", FUN = mean) %>%
-  aggregate(hcmc_shp_w_buff, FUN = mean) %>%
-  as_tibble() %>%
-  select(time, `2m_temp_HCMC.nc`) %>%
-  rename(date = time, t2m = `2m_temp_HCMC.nc`) %>%
-  mutate(
-    date = as.Date(date) %>% yearweek(),
-    t2m = t2m - 273.15,
-    scaled_t2m = scale(t2m)
-  ) %>%
-  as_tsibble()
-
 hcmc_temp_df %>%
   ggplot(aes(x = date, y = t2m)) +
   geom_line() +
-  geom_smooth()
+  geom_smooth() +
+  scale_x_yearweek("Week") +
+  scale_y_continuous("2m temperature") +
+  ggtitle("Weekly 2m temperature ERA5 reanalysis")
+
+ggsave("weekly_t2m_ts.svg", width = 10, height = 7)
 
 hist(hcmc_temp_df$t2m)
 
 hist(hcmc_temp_df$scaled_t2m)
 ```
 
-## Precipitation data
+### Precipitation data
 
 ```{r}
-hcmc_precip_df <- read_stars("../2m_precip_HCMC.nc") %>%
-  st_set_crs(4326) %>%
-  aggregate("1 week", FUN = sum) %>%
-  aggregate(hcmc_shp_w_buff, FUN = sum) %>%
-  as_tibble() %>%
-  select(time, `2m_precip_HCMC.nc`) %>%
-  rename(date = time, precip = `2m_precip_HCMC.nc`) %>%
-  mutate(
-    date = as.Date(date) %>% yearweek(),
-    precip = precip * 1000,
-    scaled_precip = scale(precip)
-  ) %>%
-  as_tsibble()
-
 hcmc_precip_df %>%
   ggplot(aes(x = date, y = precip)) +
   geom_line() +
-  geom_smooth()
+  geom_smooth() +
+  scale_x_yearweek("Week") +
+  scale_y_continuous("Total precipitation") +
+  ggtitle("Weekly Total precipitation ERA5 reanalysis")
+
+ggsave("weekly_precip_ts.svg", width = 10, height = 7)
 
 hist(hcmc_precip_df$precip)
-
 hist(hcmc_precip_df$scaled_precip)
 ```
 
+```{r}
+incidence_weekly_weather_df
+```
 
 # Time series analysis
 
@@ -131,10 +110,20 @@ hist(hcmc_precip_df$scaled_precip)
 ```{r}
 incidence_weekly_df %>%
   model(
-    stl_decomp = STL(log(n) ~ season(period = 52, window = "periodic"), robust = TRUE)
+    stl_decomp = STL(n ~ season(period = 52, window = "periodic"), robust = TRUE)
   ) %>%
   components() %>%
-  autoplot()
+  autoplot() + xlab("Date")
+
+ggsave("decomp_stl_additive.svg", width = 10, height = 7)
+
+
+# incidence_weekly_df %>%
+#   model(
+#     stl_decomp = STL(log(n) ~ season(period = 52, window = "periodic"), robust = TRUE)
+#   ) %>%
+#   components() %>%
+#   autoplot()
 ```
 
 
@@ -162,15 +151,16 @@ boxcox_white_df %>%
   left_join(boxcox_mle, by = c("lambda" = "x")) %>%
   ggplot(aes(x = lambda)) +
   geom_line(aes(y = white_pvalue), color = "red") +
-  geom_line(aes(y = (y - min(y)) / 50000), color = "blue") +
+  geom_line(aes(y = (y - min(y)) / 1000000), color = "blue") +
   scale_y_continuous(
     "White test p-value",
-    sec.axis = sec_axis(trans = ~ . * 50000 + min(boxcox_mle$y), name = "log-Likelihood")
+    sec.axis = sec_axis(trans = ~ . * 1000000 + min(boxcox_mle$y), name = "log-Likelihood")
   )
 ```
 
 ```{r}
 white_lambda <- boxcox_white_df %>%
+  filter(lambda > -1) %>%
   filter(white_pvalue == max(white_pvalue)) %>%
   pull(lambda)
 boxcox_lambda <- boxcox_mle %>%
@@ -190,12 +180,89 @@ guerrero_lambda
 ```{r}
 incidence_weekly_df %<>% mutate(n = log(n))
 train_weekly_df %<>% mutate(n = log(n))
+test_weekly_df %<>% mutate(n = log(n))
 
 ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
-  geom_line()
+  geom_line() +
+  xlab("Date") +
+  ylab("Log-transformed incidence")
+
+ggsave("weekly_incidence_log_trans.svg", width = 10, height = 7)
 ```
 
-# Weekly models
+# Modelling
+
+
+## Performance checking framework
+
+```{r}
+fit_perf <- function(fit, actual) {
+  print(summary(fit))
+
+  fitted <- fitted(fit)
+
+  fitted %>% plot(type = "l")
+
+  print(sprintf(
+    "Train RMSE: %f",
+    sqrt(mean((actual - fitted)^2))
+  ))
+  print(sprintf(
+    "Train MAE: %f",
+    mean(abs(actual - fitted))
+  ))
+
+  print(train_weekly_weather_df %>%
+    mutate(fitted = fitted) %>%
+    ggplot(aes(x = date_admitted)) +
+    geom_line(aes(y = n)) +
+    geom_line(aes(y = fitted), color = "red"))
+}
+
+model_perfs <- tibble(
+  model = character(),
+  RMSE = numeric(),
+  MAE = numeric()
+)
+
+forecast_perf <- function(forecast, actual, model_name) {
+  forecast %>% plot(type = "l")
+
+  rmse <- sqrt(mean((actual - forecast)^2))
+  mae <- mean(abs(actual - forecast))
+
+  print(sprintf("Test RMSE: %f", rmse))
+  print(sprintf("Test MAE: %f", mae))
+
+  model_perfs <<- model_perfs %>% bind_rows(tibble(model = model_name, RMSE = rmse, MAE = mae))
+
+  print(test_weekly_weather_df %>%
+    mutate(forecast = forecast) %>%
+    ggplot(aes(x = date_admitted)) +
+    geom_line(aes(y = log(n))) +
+    geom_line(aes(y = forecast), color = "red"))
+}
+```
+
+## Forecast plotting
+```{r}
+mrdp <- train_weekly_df %>% tail(1)
+mrdp_ci <- distributional::dist_normal(mrdp$n, 0)
+dimnames(mrdp_ci) <- "n"
+
+forecast_layer <- function(fit, h = 4) {
+  fit %>%
+    forecast(h = h) %>%
+    append_row(-1) %>%
+    mutate(
+      n = case_when(is.na(n) ~ mrdp_ci, .default = n),
+      .mean = case_when(is.na(.mean) ~ mrdp$n, .default = .mean)
+    ) %>%
+    as_fable(c(".mean"), "n") %>%
+    autolayer()
+}
+```
+
 
 ## SARIMA weekly
 
@@ -206,30 +273,7 @@ Quickly check if any differencing needed, both seasonal and non-seasonal
 ```{r}
 train_weekly_df %>% features(n, unitroot_ndiffs)
 train_weekly_df %>% features(n, unitroot_nsdiffs)
-
-train_weekly_decomp_seasonal <- train_weekly_df %>%
-  model(decomp = classical_decomposition(n, type = "additive")) %>%
-  components() %>%
-  pull(seasonal)
-
-train_weekly_df %>%
-  mutate(n = n - train_weekly_decomp_seasonal, n = difference(n)) %>%
-  pull(n) %>%
-  shapiro.test()
 ```
-
-```{r}
-train_weekly_df %>%
-  mutate(n = n - train_weekly_decomp_seasonal, n = difference(n)) %>%
-  pull(n) %>%
-  hist()
-
-train_weekly_df %>%
-  mutate(n = difference(n)) %>%
-  pull(n) %>%
-  shapiro.test()
-```
-
 
 ```{r}
 train_weekly_df %>%
@@ -258,7 +302,7 @@ sarima_fits <- train_weekly_df %>% model(
   # same as auto_arima but with non-seasonal differencing
   arima_211110 = ARIMA(n ~ pdq(2, 1, 1) + PDQ(1, 1, 0)),
 
-  # same as auto_arima but with non-seasonal differencing
+  # same as auto_arima but with non-seasonal differencing and more AR
   arima_411110 = ARIMA(n ~ pdq(4, 1, 1) + PDQ(1, 1, 0)),
 )
 
@@ -306,83 +350,104 @@ train_weekly_df %>%
 ### Forecast
 
 ```{r}
-forecasted_sarima <- forecast(sarima_fits, h = 4)
+forecast_p <- ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
+  forecast_layer(sarima_fits) +
+  geom_line() +
+  scale_x_yearweek("Week", limits = c(as.Date("2018-01-01"), as.Date("2019-01-21"))) +
+  scale_y_continuous("Incidence") +
+  ggtitle("4 week forecast - SARIMA")
 
-incidence_2019_weekly_df <- incidence_weekly_df %>%
-  filter_index("2018-12-14" ~ "2019-02")
+forecast_p
 
-forecast_p <- forecasted_sarima %>%
-  autoplot(incidence_2019_weekly_df) +
-  scale_x_yearweek(date_breaks = "1 week", date_labels = "W%V-%Y")
+ggsave("forecast_sarimas_4w.svg", width = 10, height = 7)
 
-forecast_p + facet_wrap(~.model, ncol = 1)
+forecast_p +
+  facet_wrap(~.model, ncol = 3) +
+  scale_x_yearweek("Week", limits = c(as.Date("2018-12-01"), as.Date("2019-01-21")))
+
+ggsave("forecast_sarimas_facet_4w.svg", width = 10, height = 7)
 ```
 
 ```{r}
-forecasted_sarima %>% accuracy(incidence_2019_weekly_df)
+forecast_perf(
+  (sarima_fits$arima_211110 %>% forecast(h = 4))[[1]] %>%
+    as_tibble(.name_repair = "check_unique") %>% pull(.mean),
+  test_weekly_df %>% pull(n),
+  "SARIMA(2,1,1)(1,1,0)"
+)
+cat("\n")
+
+forecast_perf(
+  (sarima_fits$arima_411110 %>% forecast(h = 4))[[1]] %>%
+    as_tibble(.name_repair = "check_unique") %>% pull(.mean),
+  test_weekly_df %>% pull(n),
+  "SARIMA(4,1,1)(1,1,0)"
+)
+cat("\n")
+
+forecast_perf(
+  (sarima_fits$auto_arima %>% forecast(h = 4))[[1]] %>%
+    as_tibble(.name_repair = "check_unique") %>% pull(.mean),
+  test_weekly_df %>% pull(n),
+  "SARIMA(2,0,1)(1,1,0)"
+)
 ```
 
 ## SARIMA one-week-ahead
 
 ```{r}
-fit <- sarima_fits %>% select(arima_411110)
-report(fit)
-
-forecast_1w_df <- train_weekly_df %>%
-  mutate(ci = NA) %>%
-  as_tibble()
-
-for (i in 1:4) {
-  forecasted_1w <- fit %>%
-    forecast(h = 1) %>%
-    as_tibble() %>%
-    select(date_admitted, .mean, n) %>%
-    rename(ci = n, n = .mean)
-
-  forecast_1w_df %<>% bind_rows(forecasted_1w)
-
-  fit %<>%
-    refit(
-      incidence_weekly_df %>%
-        filter_index(~ sprintf("2019 W0%d", i)) %>%
-        mutate(ci = NA),
-      reestimate = FALSE
-    )
-}
-
-ggplot(mapping = aes(x = date_admitted)) +
-  stat_lineribbon(
-    data = forecast_1w_df,
-    aes(ydist = ci),
-    linewidth = .5,
-    .width = c(0.8, 0.95),
-    color = "blue"
-  ) +
-  geom_line(
-    data = incidence_weekly_df,
-    aes(y = n)
-  ) +
-  scale_fill_brewer() +
-  scale_y_continuous(limits = c(6, 8)) +
-  scale_x_yearweek(
-    limit = c(as.Date("2018-12-01"), as.Date("2019-02-01"))
-  )
+# fit <- sarima_fits %>% select(arima_411110)
+# report(fit)
+#
+# forecast_1w_df <- train_weekly_df %>%
+#   mutate(ci = NA)
+#
+# for (i in 1:4) {
+#   forecasted_1w <- fit %>%
+#     forecast(h = 1) %>%
+#     as_tibble() %>%
+#     select(date_admitted, .mean, n) %>%
+#     rename(ci = n, n = .mean)
+#
+#   forecast_1w_df %<>% bind_rows(forecasted_1w)
+#
+#   fit %<>%
+#     refit(
+#       forecast_1w_df,
+#       reestimate = FALSE
+#     )
+# }
+#
+# ggplot(mapping = aes(x = date_admitted)) +
+#   stat_lineribbon(
+#     data = forecast_1w_df,
+#     aes(ydist = ci),
+#     linewidth = .5,
+#     .width = c(0.8, 0.95),
+#     color = "blue"
+#   ) +
+#   geom_line(
+#     data = incidence_weekly_df,
+#     aes(y = n)
+#   ) +
+#   scale_fill_brewer() +
+#   scale_y_continuous(limits = c(6, 8)) +
+#   scale_x_yearweek(
+#     limit = c(as.Date("2018-12-01"), as.Date("2019-02-01"))
+#   )
 ```
 
 ### Accuracy
 
 ```{r}
-actual <- incidence_weekly_df %>%
-  filter(year(date_admitted) == 2019) %>%
-  head(4) %>%
-  pull(n)
-forecasted <- forecast_1w_df %>%
-  filter(year(date_admitted) == 2019) %>%
-  head(4) %>%
-  pull(n)
-
-sprintf("RMSE: %f", sqrt(mean((actual - forecasted)^2)))
-sprintf("MAE: %f", mean(abs(actual - forecasted)))
+# actual <- test_weekly_df$n
+# forecasted <- forecast_1w_df %>%
+#   filter(year(date_admitted) == 2019) %>%
+#   head(4) %>%
+#   pull(n)
+#
+# sprintf("RMSE: %f", sqrt(mean((actual - forecasted)^2)))
+# sprintf("MAE: %f", mean(abs(actual - forecasted)))
 ```
 
 ## Prophet weekly
@@ -398,7 +463,7 @@ prophet_weekly_forecast <- prophet_weekly %>%
   forecast(h = 4)
 
 prophet_forecast_p <- prophet_weekly_forecast %>%
-  autoplot(incidence_2019_weekly_df) +
+  autoplot(test_weekly_df) +
   scale_x_yearweek(date_breaks = "1 week", date_labels = "W%V-%Y")
 
 prophet_forecast_p
@@ -466,13 +531,15 @@ accuracy(prophet_weekly_forecast, incidence_2019_weekly_df)
 
 SARIMAX - Seasonal Auto-Regressive Integrated Moving Average with eXogenous factors
 
+```{r}
+train_weekly_weather_df %<>% mutate(n = log(n))
+test_weekly_weather_df %<>% mutate(n = log(n))
+```
+
+
 ### Model fitting
 
 ```{r}
-train_weekly_weather_df <- train_weekly_df %>%
-  left_join(hcmc_temp_df, by = c("date_admitted" = "date")) %>%
-  left_join(hcmc_precip_df, by = c("date_admitted" = "date"))
-
 future::plan(future::multisession)
 
 sarimax_fits <- train_weekly_weather_df %>% model(
@@ -536,42 +603,39 @@ fitted_sarimax_p +
 ### Forecasting
 
 ```{r}
-incidence_weekly_weather_df <- incidence_weekly_df %>%
-  left_join(
-    hcmc_temp_df,
-    by = c("date_admitted" = "date")
+sarimax_fits %>%
+  forecast(h = test_weekly_weather_df) %>%
+  append_row(-1) %>%
+  mutate(
+    n = case_when(is.na(n) ~ mrdp_ci, .default = n),
+    .mean = case_when(is.na(.mean) ~ mrdp$n, .default = .mean)
   ) %>%
-  left_join(
-    hcmc_precip_df,
-    by = c("date_admitted" = "date")
-  )
+  as_fable(c(".mean"), "n") %>%
+  autolayer()
 
-test_weekly_weather_df <- incidence_weekly_weather_df %>%
-  filter(year(date_admitted) == 2019) %>%
-  head(4)
 
-forecasted_sarimax <- forecast(
-  sarimax_fits,
-  new_data = test_weekly_weather_df
-)
 
-forecast_p <- forecasted_sarimax %>%
-  autoplot(incidence_weekly_weather_df) +
-  scale_x_yearweek(
-    "Date",
-    date_breaks = "1 week", date_labels = "W%V-%Y",
-    limit = c(as.Date("2018-12-01"), as.Date("2019-02-01"))
-  ) +
-  scale_y_continuous("Incidence (log10-transformed)", limits = c(5.5, 8)) +
-  scale_alpha_continuous("Confidence interval")
+
+forecast_p <- ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
+  forecast_layer(sarimax_fits, h = test_weekly_weather_df) +
+  geom_line() +
+  scale_x_yearweek("Week", limits = c(as.Date("2018-01-01"), as.Date("2019-01-21"))) +
+  scale_y_continuous("Incidence") +
+  ggtitle("4 week forecast - SARIMA")
 
 forecast_p
 
-forecast_p + facet_wrap(~.model, ncol = 2, scales = "free_y")
+# ggsave("forecast_sarimas_4w.svg", width = 10, height = 7)
 
-accuracy(forecasted_sarimax, test_weekly_weather_df)
+forecast_p +
+  facet_wrap(~.model) +
+  scale_x_yearweek("Week", limits = c(as.Date("2018-12-01"), as.Date("2019-01-21")))
 
-ggsave("sarimax_4w_forecasts.png", width = 10, height = 7)
+# ggsave("forecast_sarimas_facet_4w.svg", width = 10, height = 7)
+
+# accuracy(forecasted_sarimax, test_weekly_weather_df)
+
+# ggsave("sarimax_4w_forecasts.png", width = 10, height = 7)
 ```
 
 #### One-week-ahead
