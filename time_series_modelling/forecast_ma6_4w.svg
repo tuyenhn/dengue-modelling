@@ -47,13 +47,13 @@
 <polyline points='350.97,472.50 350.97,23.18 ' style='stroke-width: 1.07; stroke: #EBEBEB; stroke-linecap: butt;' />
 <polyline points='506.38,472.50 506.38,23.18 ' style='stroke-width: 1.07; stroke: #EBEBEB; stroke-linecap: butt;' />
 <polyline points='650.69,472.50 650.69,23.18 ' style='stroke-width: 1.07; stroke: #EBEBEB; stroke-linecap: butt;' />
-<polygon points='639.59,175.84 650.69,167.18 661.79,166.05 672.89,167.56 683.99,168.89 683.99,239.27 672.89,229.54 661.79,217.23 650.69,204.03 639.59,175.84 ' style='stroke-width: 0.00; stroke: none; stroke-linecap: butt; fill: #CCCCFE;' />
-<polyline points='639.59,175.84 650.69,167.18 661.79,166.05 672.89,167.56 683.99,168.89 ' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt;' />
-<polyline points='683.99,239.27 672.89,229.54 661.79,217.23 650.69,204.03 639.59,175.84 ' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt;' />
-<polygon points='639.59,175.84 650.69,173.56 661.79,174.91 672.89,178.29 683.99,181.07 683.99,227.09 672.89,218.81 661.79,208.38 650.69,197.66 639.59,175.84 ' style='stroke-width: 0.00; stroke: none; stroke-linecap: butt; fill: #9999FF;' />
-<polyline points='639.59,175.84 650.69,173.56 661.79,174.91 672.89,178.29 683.99,181.07 ' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt;' />
-<polyline points='683.99,227.09 672.89,218.81 661.79,208.38 650.69,197.66 639.59,175.84 ' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt;' />
-<polyline points='639.59,175.84 650.69,185.61 661.79,191.64 672.89,198.55 683.99,204.08 ' style='stroke-width: 1.07; stroke: #0000FF; stroke-linecap: butt;' />
+<polygon points='639.59,175.84 650.69,185.24 661.79,205.29 672.89,238.78 683.99,281.42 683.99,393.31 672.89,335.25 661.79,278.59 650.69,231.44 639.59,175.84 ' style='stroke-width: 0.00; stroke: none; stroke-linecap: butt; fill: #CCCCFE;' />
+<polyline points='639.59,175.84 650.69,185.24 661.79,205.29 672.89,238.78 683.99,281.42 ' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt;' />
+<polyline points='683.99,393.31 672.89,335.25 661.79,278.59 650.69,231.44 639.59,175.84 ' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt;' />
+<polygon points='639.59,175.84 650.69,193.23 661.79,217.98 672.89,255.48 683.99,300.79 683.99,373.95 672.89,318.56 661.79,265.91 650.69,223.44 639.59,175.84 ' style='stroke-width: 0.00; stroke: none; stroke-linecap: butt; fill: #9999FF;' />
+<polyline points='639.59,175.84 650.69,193.23 661.79,217.98 672.89,255.48 683.99,300.79 ' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt;' />
+<polyline points='683.99,373.95 672.89,318.56 661.79,265.91 650.69,223.44 639.59,175.84 ' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt;' />
+<polyline points='639.59,175.84 650.69,208.34 661.79,241.94 672.89,287.02 683.99,337.37 ' style='stroke-width: 1.07; stroke: #0000FF; stroke-linecap: butt;' />
 <polyline points='73.46,372.40 84.56,370.00 95.66,396.16 106.76,387.52 117.86,391.84 128.96,403.60 140.06,422.80 151.16,405.52 162.26,398.32 173.36,406.72 184.46,403.84 195.56,418.00 206.66,418.00 217.77,424.24 228.87,425.44 239.97,419.20 251.07,425.44 262.17,422.08 273.27,425.20 284.37,415.12 295.47,419.68 306.57,414.88 317.67,406.24 328.77,399.04 339.87,385.36 350.97,382.96 362.07,364.48 373.17,357.52 384.28,355.36 395.38,343.36 406.48,319.84 417.58,320.32 428.68,312.88 439.78,309.52 450.88,311.92 461.98,294.16 473.08,292.72 484.18,290.32 495.28,291.52 506.38,273.28 517.48,257.20 528.58,228.40 539.68,196.96 550.79,189.04 561.89,174.16 572.99,160.48 584.09,168.16 595.19,216.40 606.29,203.20 617.39,160.72 628.49,207.04 639.59,175.84 650.69,188.08 661.79,146.08 672.89,157.36 683.99,171.76 ' style='stroke-width: 1.07; stroke-linecap: butt;' />
 <rect x='42.93' y='23.18' width='671.59' height='449.33' style='stroke-width: 1.07; stroke: #333333;' />
 </g>
@@ -78,6 +78,6 @@
 <text x='650.69' y='483.74' text-anchor='middle' style='font-size: 8.80px;fill: #4D4D4D; font-family: "Arial";' textLength='40.13px' lengthAdjust='spacingAndGlyphs'>2019 W01</text>
 <text x='378.73' y='496.20' text-anchor='middle' style='font-size: 11.00px; font-family: "Arial";' textLength='27.92px' lengthAdjust='spacingAndGlyphs'>Week</text>
 <text transform='translate(13.36,247.84) rotate(-90)' text-anchor='middle' style='font-size: 11.00px; font-family: "Arial";' textLength='47.10px' lengthAdjust='spacingAndGlyphs'>Incidence</text>
-<text x='42.93' y='14.93' style='font-size: 13.20px; font-family: "Arial";' textLength='145.16px' lengthAdjust='spacingAndGlyphs'>4 week forecast - AR(10)</text>
+<text x='42.93' y='14.93' style='font-size: 13.20px; font-family: "Arial";' textLength='140.01px' lengthAdjust='spacingAndGlyphs'>4 week forecast - MA(6)</text>
 </g>
 </svg>
