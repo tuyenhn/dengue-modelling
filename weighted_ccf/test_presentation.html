@@ -457,7 +457,20 @@ Tuyen Huynh
 </table>
 </div>
 </div>
+</section></section>
+<section>
+<section id="delay-effect-beta" class="title-slide slide level1 center">
+<h1>Delay effect (beta)</h1>
+
 </section>
+<section id="description-1" class="slide level2">
+<h2>Description</h2>
+<ul>
+<li>At every lag <span class="math inline">\(k\)</span> for covariables, we perform an average weighted by a kernel. The shape of this kernel will be defined by <span class="math inline">\(\beta\)</span>.</li>
+<li>We call this the delay effect transformation. <span class="math inline">\(\beta\)</span> and <span class="math inline">\(k\)</span> are hyperparameters that will be tuned to find the best value (based on forecast RMSE).</li>
+</ul>
+
+<img data-src="./delay_effect.png" class="r-stretch quarto-figure-center"><p class="caption">Delay effect</p></section>
 <section id="going-to-sleep" class="slide level2">
 <h2>Going to sleep</h2>
 <ul>

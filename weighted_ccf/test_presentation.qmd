@@ -276,6 +276,14 @@ knitr::kable(
 )
 ```
 
+# Delay effect (beta)
+
+## Description
+
+-   At every lag $k$ for covariables, we perform an average weighted by a kernel. The shape of this kernel will be defined by $\beta$.
+-   We call this the delay effect transformation. $\beta$ and $k$ are hyperparameters that will be tuned to find the best value (based on forecast RMSE).
+
+![Delay effect](./delay_effect.png)
 
 ## Going to sleep
 
