@@ -1,0 +1,204 @@
+---
+title: "Test presentation"
+author: Tuyen Huynh
+format: 
+  revealjs:
+    css: styles.css
+fig-cap-location: bottom
+fig-width: 12
+fig-height: 7
+fig-align: center
+crossref:
+  fig-labels: arabic
+  title-delim: "**.**"
+---
+
+```{r include=FALSE}
+source("../time_series_modelling/data_weekly.R")
+theme_set(theme_bw())
+alpha_precip_perfs <- read_rds("./grid_perfs/alpha_precip_perfs.rds")
+alpha_temp_perfs <- read_rds("./grid_perfs/alpha_temp_perfs.rds")
+alpha_rh_perfs <- read_rds("./grid_perfs/alpha_rh_perfs.rds")
+```
+
+# Data description
+
+## Epidemiological data
+
+-   **Source**: Ho Chi Minh City CDC
+-   **Temporal coverage**: 2000 -- 2022 (inclusive)
+    -   **Train set**: 2000 -- 2017
+    -   **Validation set**: 2018
+    -   **Test set**: 2019
+-   **Format**: Weekly aggregated admission
+    -   Raw format is line listing -- each case admission is one row
+-   **Spatial coverage**: Ho Chi Minh City
+-   In-patient cases only
+    -   out-patient data is only available from 2017
+
+------------------------------------------------------------------------
+
+```{r}
+#| label: fig-incidence_weekly_ts
+#| fig-cap: Dengue weekly incidence time series
+#| echo: false
+ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
+  geom_step() +
+  scale_x_yearweek(
+    "Date",
+    breaks = yearweek(paste0(seq(2000, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(2000, 2023, 1))
+  ) +
+  scale_y_continuous("Case admitted")
+```
+
+------------------------------------------------------------------------
+
+```{r}
+#| label: fig-incidence_weekly_ts_splits
+#| fig-cap: Train - validation - test set splits
+#| echo: false
+incidence_weekly_df %>%
+  filter_index("2000 W01" ~ "2019 W52") %>%
+  ggplot(aes(x = date_admitted, y = n)) +
+  geom_step() +
+  geom_vline(xintercept = as.Date(yearweek("2018 W01")), color = "red") +
+  geom_vline(xintercept = as.Date(yearweek("2019 W01")), color = "red") +
+  scale_x_yearweek(
+    "Date",
+    breaks = yearweek(paste0(seq(2000, 2020, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(2000, 2020, 1))
+  ) +
+  scale_y_continuous("Case admitted")
+```
+
+## Meteorological data
+
+-   **Source**: ERA5 -- ECMWF atmospheric reanalysis (5th gen)
+    -   **Variables**: 2m temperature, total precipitation, relative humidity
+    -   All variables are daily aggregated
+-   **Temporal coverage**: 1999 -- 2022 (inclusive)
+    -   **Train set**: 2000 -- 2017
+    -   **Validation set**: 2018
+    -   **Test set**: 2019
+-   Temporal resolution: Daily
+-   Spatial coverage: Ho Chi Minh City\*
+
+*\* cropped by Ho Chi Minh City 10km buffer bounding box and then spatially aggregated in R*
+
+------------------------------------------------------------------------
+
+```{r}
+#| label: fig-t2m_weekly_ts
+#| fig-cap: Weekly average 2m temperature
+#| echo: false
+hcmc_temp_df %>%
+  ggplot(aes(x = date, y = t2m)) +
+  geom_line() +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs")) +
+  scale_x_yearweek(
+    "Date",
+    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(1999, 2023, 1))
+  ) +
+  scale_y_continuous("Degree Celsius", breaks = seq(22, 32, 2))
+```
+
+------------------------------------------------------------------------
+
+```{r}
+#| label: fig-precip_weekly_ts
+#| fig-cap: Weekly total precipitation
+#| echo: false
+hcmc_precip_df %>%
+  ggplot(aes(x = date, y = precip)) +
+  geom_line() +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs")) +
+  scale_x_yearweek(
+    "Week",
+    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(1999, 2023, 1))
+  ) +
+  scale_y_continuous("Millimeters")
+```
+
+------------------------------------------------------------------------
+
+```{r}
+#| label: fig-rh_weekly_ts
+#| fig-cap: Weekly average relative humidity
+#| echo: false
+hcmc_rh_df %>%
+  ggplot(aes(x = date, y = rh)) +
+  geom_line() +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs")) +
+  scale_x_yearweek(
+    "Week",
+    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(1999, 2023, 1))
+  ) +
+  scale_y_continuous("Percent")
+```
+
+# Accumulation effect (alpha)
+
+## Description
+
+-   At every lag $k$ for covariables, we perform a summation from the past $\alpha$ time points up until $k$.
+-   We call this the accumulation effect transformation. $\alpha$ and $k$ are hyperparameters that will be tuned to find the best value (based on forecast RMSE).
+
+![Accumulation effect](./accum_effect.png)
+
+## Hyperparameter tuning results
+
+```{r}
+#| label: fig-t2m_alpha_res
+#| fig-cap: Accumulation and lag effect on 2m temperature, 52-week forecast RMSE
+#| echo: false
+best_t2m_param <- alpha_temp_perfs %>% filter(RMSE == min(RMSE))
+alpha_temp_perfs %>%
+  ggplot(aes(x = lag, y = alpha)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_t2m_param, shape = 4, color = "red", size = 2, stroke = 1) +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Accumulated weeks (alpha)")
+```
+
+---
+
+```{r}
+#| label: fig-precip_alpha_res
+#| fig-cap: Accumulation and lag effect on precipitation, 52-week forecast RMSE
+#| echo: false
+best_precip_param <- alpha_precip_perfs %>% filter(RMSE == min(RMSE))
+alpha_precip_perfs %>%
+  ggplot(aes(x = lag, y = alpha)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_precip_param, shape = 4, color = "red", size = 2, stroke = 1) +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Accumulated weeks (alpha)")
+```
+
+---
+
+```{r}
+#| label: fig-rh_alpha_res
+#| fig-cap: Accumulation and lag effect on relative humidity, 52-week forecast RMSE
+#| echo: false
+best_rh_param <- alpha_rh_perfs %>% filter(RMSE == min(RMSE))
+alpha_rh_perfs %>%
+  ggplot(aes(x = lag, y = alpha)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_rh_param, shape = 4, color = "red", size = 2, stroke = 1) +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Accumulated weeks (alpha)")
+```
+
+
+## Going to sleep
+
+-   Get in bed
+-   Count sheep

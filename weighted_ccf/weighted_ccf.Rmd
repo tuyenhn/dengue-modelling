@@ -235,7 +235,7 @@ alpha_apply <- function(row, covarDf, varcol) {
   )
 }
 
-hyper_grid <- function(covarDf, varcol) {
+alpha_hyper_grid <- function(covarDf, varcol) {
   # param grid
   lags <- 0:52
   alphas <- 1:52
@@ -268,9 +268,13 @@ hyper_grid <- function(covarDf, varcol) {
 
 
 
-alpha_precip_perfs <- hyper_grid(covarDf = hcmc_precip_df, varcol = "precip")
-alpha_temp_perfs <- hyper_grid(covarDf = hcmc_temp_df, varcol = "t2m")
-alpha_rh_perfs <- hyper_grid(covarDf = hcmc_rh_df, varcol = "rh")
+alpha_precip_perfs <- alpha_hyper_grid(hcmc_precip_df, "precip")
+alpha_temp_perfs <- alpha_hyper_grid(hcmc_temp_df, "t2m")
+alpha_rh_perfs <- alpha_hyper_grid(hcmc_rh_df, "rh")
+
+# alpha_precip_perfs %>% write_rds("./grid_perfs/alpha_precip_perfs.rds")
+# alpha_temp_perfs %>% write_rds("./grid_perfs/alpha_temp_perfs.rds")
+# alpha_rh_perfs %>% write_rds("./grid_perfs/alpha_rh_perfs.rds")
 ```
 
 
