@@ -675,65 +675,86 @@ models_res %>%
 
 # Alpha + Beta
 ```{r}
-func <- function(alpha, beta) {
-  alpha_df <- tsibble_rollsum(hcmc_temp_df, "t2m", "date", alpha = alpha) %>%
-    rename(alpha_val = value)
-  beta_df <- tsibble_rollapply(
-    hcmc_temp_df, "t2m", "date",
-    kernel = dnorm(seq(-1, 1, length.out = 13), sd = beta), width = 13
-  ) %>%
-    rename(beta_val = value)
+alpha_beta_apply <- function(row, covarDf, varcol) {
+  alpha <- row["alphas"]
+  beta <- row["betas"]
+  # a_lag <- row["alpha_lags"]
+  # b_lag <- row["beta_lags"]
+  lag <- row["lags"]
 
-  transformed_df <- incidence_weekly_df %>%
-    left_join(alpha_df, by = c("date_admitted" = "index")) %>%
-    left_join(beta_df, by = c("date_admitted" = "index"))
+  gauss_kernel <- dnorm(seq(-5, 5), sd = beta)
 
-  train_df <- transformed_df %>%
-    filter_index("2000 W01" ~ "2018 W52")
+  roll_df <- incidence_weekly_df %>%
+    left_join(
+      tsibble_rollsum(covarDf, varcol, "date", alpha = alpha) %>%
+        rename(accum_val = value),
+      by = c("date_admitted" = "index")
+    ) %>%
+    left_join(
+      tsibble_rollapply(covarDf, varcol, "date", kernel = gauss_kernel) %>%
+        rename(delay_val = value),
+      by = c("date_admitted" = "index")
+    ) %>%
+    mutate(
+      accum_val = lag(accum_val, lag),
+      delay_val = lag(delay_val, lag),
+    )
 
-  test_df <- transformed_df %>%
-    filter_index("2019 W01" ~ "2019 W04")
+  train_df <- roll_df %>%
+    filter_index("2000 W01" ~ "2017 W52")
 
-  glm_fit <- glm(
-    n ~ date_admitted + alpha_val + beta_val,
+  test_df <- roll_df %>%
+    filter_index("2018 W01" ~ "2018 W52")
+
+  fit <- glm(
+    n ~ date_admitted + accum_val + delay_val,
     family = poisson(), data = train_df
   )
 
-  forecast <- glm_fit %>% predict(newdata = test_df)
-  actual <- test_df$n
-
-  sqrt(mean((actual - forecast)^2))
-}
-```
-
-
-```{r}
-# param_grid <- expand.grid(1:52, 1:30) %>%
-#   as_tibble() %>%
-#   rename(alpha = Var1, beta = Var2) %>%
-#   mutate(beta = beta / 10) %>%
-#   mutate(rmse = func(alpha, beta))
-
-res_mat <- matrix(NA, nrow = length(1:52), ncol = length(1:30))
-
-pb <- progress::progress_bar$new(total = length(1:52) * length(1:30))
-for (i in 1:52) {
-  for (j in 1:30) {
-    res_mat[i, j] <- func(i, j / 10)
-    pb$tick()
-  }
+  forecast_perf(
+    # fit, test_df, sprintf("alpha=%d, a_lag=%d, beta=%d, b_lag=%d", alpha, a_lag, beta * 10, b_lag),
+    fit, test_df, sprintf("alpha=%d, beta=%d, b_lag=%d", alpha, beta * 10, lag),
+    plot = FALSE, res_print = FALSE, res_df = TRUE
+  )
 }
 
+alpha_beta_hyper_grid <- function(covarDf, varcol) {
+  # param grid
+  alphas <- 1:52
+  betas <- 1:30
+  # alpha_lags <- 0:52
+  # beta_lags <- 0:52
+  lags <- 0:52
 
-res_mat %>% write_rds("res_mat.rds")
+  param_grid <- expand.grid(
+    alphas = alphas, betas = betas, lags = lags # , alpha_lags = alpha_lags, beta_lags = beta_lags
+  )
 
-res_mat %>%
-  as_tibble() %>%
-  rename_with(.fn = \(x) paste0("beta", as.character(1:30))) %>%
-  mutate(alpha = 1:52, .before = "beta1") %>%
-  pivot_longer(-alpha, names_to = "beta", values_to = "rmse") %>%
-  mutate(beta = parse_number(beta) / 10) %>%
-  ggplot(aes(x = beta, y = alpha)) +
-  geom_tile(aes(fill = rmse)) +
-  scale_fill_viridis_c(direction = -1)
+  # cluster setup
+  cl <- makeCluster(6)
+  clusterEvalQ(cl, suppressPackageStartupMessages(library("tidyverse")))
+  clusterEvalQ(cl, library("zoo"))
+  clusterEvalQ(cl, library("tsibble"))
+  clusterExport(cl, ls(globalenv()))
+
+  # hyperparam grid tuning
+  apply_res <- pbapply::pbapply(
+    param_grid, 1, alpha_beta_apply,
+    cl = cl, covarDf = covarDf, varcol = varcol
+  )
+
+  # teardown
+  stopCluster(cl)
+
+  apply_res %>%
+    list_c()
+}
+
+alpha_beta_precip_perfs <- alpha_beta_hyper_grid(hcmc_precip_df, "precip")
+
+#########################################################
+
+# alpha_beta_precip_perfs <- alpha_hyper_grid(hcmc_precip_df, "precip")
+# alpha_temp_perfs <- alpha_hyper_grid(hcmc_temp_df, "t2m")
+# alpha_rh_perfs <- alpha_hyper_grid(hcmc_rh_df, "rh")
 ```
