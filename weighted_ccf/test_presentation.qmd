@@ -4,6 +4,7 @@ author: Tuyen Huynh
 format: 
   revealjs:
     css: styles.css
+    scrollable: true
 fig-cap-location: bottom
 fig-width: 12
 fig-height: 7
@@ -22,6 +23,8 @@ alpha_precip_perfs <- read_rds("./grid_perfs/alpha_precip_perfs.rds")
 alpha_temp_perfs <- read_rds("./grid_perfs/alpha_temp_perfs.rds")
 alpha_rh_perfs <- read_rds("./grid_perfs/alpha_rh_perfs.rds")
 
+models_res <- read_csv("./grid_perfs/alpha_poisson_perfs.csv")
+
 
 tsibble_rollsum <- function(df, varcol, datecol, alpha = 10) {
   alpha_df <- zoo(df %>% pull(varcol), df %>% pull(datecol))
@@ -34,7 +37,7 @@ tsibble_rollsum <- function(df, varcol, datecol, alpha = 10) {
 
 # Data description
 
-## Epidemiological data
+## Epidemiological data {.smaller}
 
 -   **Source**: Ho Chi Minh City CDC
 -   **Temporal coverage**: 2000 -- 2022 (inclusive)
@@ -83,7 +86,7 @@ incidence_weekly_df %>%
   scale_y_continuous("Case admitted")
 ```
 
-## Meteorological data
+## Meteorological data {.smaller}
 
 -   **Source**: ERA5 -- ECMWF atmospheric reanalysis (5th gen)
     -   **Variables**: 2m temperature, total precipitation, relative humidity
@@ -153,7 +156,7 @@ hcmc_rh_df %>%
 
 # Accumulation effect (alpha)
 
-## Description
+## Description {.smaller}
 
 -   At every lag $k$ for covariables, we perform a summation from the past $\alpha$ time points up until $k$.
 -   We call this the accumulation effect transformation. $\alpha$ and $k$ are hyperparameters that will be tuned to find the best value (based on forecast RMSE).
@@ -208,82 +211,50 @@ alpha_rh_perfs %>%
   scale_y_continuous("Accumulated weeks (alpha)")
 ```
 
-## Testing
+## Testing {.smaller}
 
--   Now we fit 2 Poisson regression models, one model will have untransformed non-lagged covariables, the other model will have accumulated and lagged covariables. The forecast horizon will be 4 weeks (i.e. week 1-4 in 2019)
-
-```{r}
-#| include: false
-accum_precip_df <- tsibble_rollsum(hcmc_precip_df, "precip", "date", alpha = 18) %>%
-  mutate(value = lag(value, 13)) %>%
-  rename(precip = value)
-
-accum_t2m_df <- tsibble_rollsum(hcmc_temp_df, "t2m", "date", alpha = 20) %>%
-  mutate(value = lag(value, 50)) %>%
-  rename(t2m = value)
-
-accum_rh_df <- tsibble_rollsum(hcmc_rh_df, "rh", "date", alpha = 6) %>%
-  mutate(value = lag(value, 37)) %>%
-  rename(rh = value)
-
-accum_lagged_df <- accum_precip_df %>%
-  left_join(accum_t2m_df) %>%
-  left_join(accum_rh_df)
-accum_lagged_df
-
-train_weekly_accum_df <- incidence_weekly_df %>%
-  left_join(accum_lagged_df, by = c("date_admitted" = "index")) %>%
-  filter_index("2000 W06" ~ "2017 W52")
-
-test_weekly_accum_df <- incidence_weekly_df %>%
-  left_join(accum_lagged_df, by = c("date_admitted" = "index")) %>%
-  filter_index("2019 W01" ~ "2019 W04")
-```
+-   Now we fit 2 Poisson regression models, one model will have untransformed non-lagged covariables, the other model will have accumulated and lagged covariables. The forecast horizon will be 4 weeks (i.e. week 1-4 in 2019). Each model type will have all possible combinations of covariables.
 
 ```{r}
-poisson_fit <- glm(
-  n ~ date_admitted + t2m + precip + rh,
-  family = poisson(), data = train_weekly_weather_df
-)
-forecast1 <- poisson_fit %>%
-  predict(newdata = test_weekly_weather_df %>% head(4)) %>%
-  as.vector() %>%
-  exp()
-actual1 <- test_weekly_weather_df %>%
-  head(4) %>%
-  pull(n)
-rmse1 <- sqrt(mean((forecast1 - actual1)^2))
-mae1 <- mean(abs(forecast1 - actual1))
-
-poisson_accum_lagged_fit <- glm(
-  n ~ date_admitted + t2m + precip + rh,
-  family = poisson(), data = train_weekly_accum_df
-)
-forecast2 <- poisson_accum_lagged_fit %>%
-  predict(newdata = test_weekly_accum_df) %>%
-  as.vector() %>%
-  exp()
-actual2 <- test_weekly_accum_df %>% pull(n)
-rmse2 <- sqrt(mean((forecast2 - actual2)^2))
-mae2 <- mean(abs(forecast2 - actual2))
-
-knitr::kable(
-  tibble(
-    model = c("Poisson + raw covariables", "Poisson + accumulated, lagged covariables"),
-    rmse = c(rmse1, rmse2),
-    mae = c(mae1, mae2)
-  )
-)
+#| label: tbl-alpha_effect_results
+#| tbl-cap: Poisson regression models with and without accumulation effect RMSE
+knitr::kable(models_res)
 ```
+
+---
+
+```{r}
+#| label: fig-alpha_effect_results_plot
+#| fig-cap: Poisson regression models with and without accumulation effect RMSE
+#| echo: false
+models_res %>%
+  mutate(type = case_when(
+    startsWith(model, "Poisson accum lagged") ~ "Poisson with accumulation and lagged effect",
+    .default = "Poisson"
+  )) %>%
+  group_by(type) %>%
+  mutate(mean_rmse = mean(RMSE)) %>%
+  ggplot() +
+  geom_col(aes(y = model, x = RMSE)) +
+  geom_vline(aes(xintercept = mean_rmse), color = "red") +
+  scale_x_continuous("Root Mean Squared Error (RMSE)", breaks = seq(0, 800, 100)) +
+  scale_y_discrete("Model configuration") +
+  facet_wrap(~type, ncol = 1, scales = "free_y")
+```
+
 
 # Delay effect (beta)
 
-## Description
+## Description {.smaller}
 
 -   At every lag $k$ for covariables, we perform a summation weighted by a kernel. The shape of this kernel will be defined by $\beta$.
 -   We call this the delay effect transformation. $\beta$ and $k$ are hyperparameters that will be tuned to find the best value (based on forecast RMSE).
 
 ![Delay effect](./delay_effect.png)
+
+--- 
+
+
 
 ## Going to sleep
 

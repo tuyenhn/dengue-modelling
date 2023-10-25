@@ -320,6 +320,8 @@ best_rh_param
 
 
 ## Testing
+
+### Accumulated + lagged df
 ```{r}
 accum_precip_df <- tsibble_rollsum(hcmc_precip_df, "precip", "date", alpha = 18) %>%
   mutate(value = lag(value, 13)) %>%
@@ -349,25 +351,75 @@ test_weekly_accum_df <- incidence_weekly_df %>%
   filter_index("2019 W01" ~ "2019 W04")
 ```
 
+### Testing framework
+
 ```{r}
-poisson_fit <- glm(
-  n ~ date_admitted + t2m + precip + rh,
-  family = poisson(), data = train_weekly_weather_df
+poisson_fit <- function(row) {
+  formula <- row$formula
+  data <- row$train
+  newdata <- row$test
+  base_model_name <- row$base_model_name
+
+  fit <- glm(formula = formula, family = poisson(), data = data)
+
+  model_name <- paste0(
+    base_model_name, " + ",
+    paste(names(fit$coefficients) %>% tail(-2), collapse = " + ")
+  )
+
+  forecast_perf(fit, newdata = newdata, model_name = model_name, res_df = TRUE, plot = FALSE, res_print = FALSE)
+}
+
+formulas <- c(
+  n ~ date_admitted,
+  n ~ date_admitted + t2m,
+  n ~ date_admitted + precip,
+  n ~ date_admitted + rh,
+  n ~ date_admitted + t2m + precip,
+  n ~ date_admitted + t2m + rh,
+  n ~ date_admitted + precip + rh,
+  n ~ date_admitted + t2m + precip + rh
+)
+settings <- list(
+  list(train_weekly_weather_df, test_weekly_weather_df %>% head(4), "Poisson"),
+  list(train_weekly_accum_df, test_weekly_accum_df, "Poisson accum lagged")
 )
 
-poisson_accum_lagged_fit <- glm(
-  n ~ date_admitted + t2m + precip + rh,
-  family = poisson(), data = train_weekly_accum_df
-)
+model_pars <- expand.grid(formula = formulas, setting = settings) %>%
+  as_tibble() %>%
+  rowid_to_column() %>%
+  unnest(setting) %>%
+  mutate(name = rep(c("train", "test", "base_model_name"), n() / 3)) %>%
+  pivot_wider(id_cols = c(rowid, formula), values_from = setting) %>%
+  mutate(base_model_name = unlist(base_model_name))
 
+cl <- makeCluster(6)
+clusterEvalQ(cl, suppressPackageStartupMessages(library("tidyverse")))
+clusterExport(cl, c("forecast_perf"))
 
-forecast_perf(
-  poisson_fit, test_weekly_weather_df %>% head(4), "Poisson t2m + precip + rh"
-)
+models_res <- pbapply::pbapply(model_pars, 1, poisson_fit, cl = cl) %>% list_c()
 
-forecast_perf(
-  poisson_accum_lagged_fit, test_weekly_accum_df, "Poisson accum lagged t2m + precip + rh"
-)
+stopCluster(cl)
+
+models_res
+
+# models_res %>% write_csv("./grid_perfs/alpha_poisson_perfs.csv")
+```
+
+### Results comparison
+
+```{r}
+models_res %>%
+  mutate(type = case_when(
+    startsWith(model, "Poisson accum lagged") ~ "Poisson accum lagged",
+    .default = "Poisson"
+  )) %>%
+  group_by(type) %>%
+  mutate(mean_rmse = mean(RMSE)) %>%
+  ggplot() +
+  geom_col(aes(y = model, x = RMSE)) +
+  geom_vline(aes(xintercept = mean_rmse), color = "red") +
+  facet_wrap(~type, ncol = 1, scales = "free_y")
 ```
 
 
