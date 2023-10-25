@@ -15,13 +15,15 @@ incidence_weekly_df <- incidence_raw %>%
   summarise(n = sum(n)) %>%
   rename(date_admitted = agg)
 
+## sets
 train_weekly_df <- incidence_weekly_df %>%
-  filter(year(date_admitted) < 2019) %>%
-  tail(-1)
+  filter_index("2000 W01" ~ "2017 W52")
+
+val_weekly_df <- incidence_weekly_df %>%
+  filter_index("2018 W01" ~ "2018 W52")
 
 test_weekly_df <- incidence_weekly_df %>%
-  filter(year(date_admitted) == 2019) %>%
-  head(4)
+  filter_index("2019 W01" ~ "2019 W52")
 
 # HCMC shapefile
 hcmc_shp <- read_rds("../gadm/gadm41_VNM_1_pk.rds") %>%
@@ -32,7 +34,7 @@ hcmc_shp <- read_rds("../gadm/gadm41_VNM_1_pk.rds") %>%
 hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
 
 # temperature and precipitation from ERA5
-raw_weather <- read_stars("../t2m_precip_1999_2023_HCMC.nc") %>%
+raw_weather <- read_ncdf("../../meteorological data/ECMWF/iago/T2m_RH_TP_1999_2022_L2.nc") %>%
   st_set_crs(4326)
 
 hcmc_temp_df <- raw_weather %>%
@@ -63,7 +65,22 @@ hcmc_precip_df <- raw_weather %>%
   ) %>%
   as_tsibble()
 
-hcmc_weather_df <- hcmc_temp_df %>% left_join(hcmc_precip_df)
+hcmc_rh_df <- raw_weather %>%
+  select(rh) %>%
+  aggregate("1 week", FUN = mean) %>%
+  aggregate(hcmc_shp_w_buff, FUN = mean) %>%
+  as_tibble() %>%
+  select(time, rh) %>%
+  rename(date = time, rh = rh) %>%
+  mutate(
+    date = as.Date(date) %>% yearweek(),
+    scaled_rh = scale(rh) %>% as.double()
+  ) %>%
+  as_tsibble()
+
+hcmc_weather_df <- hcmc_temp_df %>%
+  left_join(hcmc_precip_df) %>%
+  left_join(hcmc_rh_df)
 
 # join weather and incidence data
 incidence_weekly_weather_df <- incidence_weekly_df %>%
@@ -71,8 +88,10 @@ incidence_weekly_weather_df <- incidence_weekly_df %>%
   left_join(hcmc_weather_df, by = c("date_admitted" = "date"))
 
 train_weekly_weather_df <- incidence_weekly_weather_df %>%
-  filter_index("2000 W01" ~ "2018 W52")
+  filter_index("2000 W01" ~ "2017 W52")
+
+val_weekly_weather_df <- incidence_weekly_weather_df %>%
+  filter_index("2018 W01" ~ "2018 W52")
 
 test_weekly_weather_df <- incidence_weekly_weather_df %>%
-  filter(year(date_admitted) == 2019) %>%
-  head(4)
+  filter_index("2019 W01" ~ "2019 W52")

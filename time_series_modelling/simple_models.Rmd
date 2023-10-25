@@ -44,7 +44,12 @@ source("./data_weekly.R")
 
 ```{r}
 ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
-  geom_line()
+  geom_step() +
+  scale_x_yearweek("Week of admission") +
+  scale_y_continuous("Case admitted") +
+  ggtitle("Dengue weekly incidence")
+
+ggsave("weekly_incidence_ts.svg", width = 12, height = 7)
 ```
 
 ## HCMC shape
@@ -103,7 +108,28 @@ incidence_weekly_weather_df
 
 # Modelling
 
-## Performance checking framework
+## Framework
+
+### Forecast plotting
+```{r}
+mrdp <- train_weekly_df %>% tail(1)
+mrdp_ci <- distributional::dist_normal(mrdp$n, 0)
+dimnames(mrdp_ci) <- "n"
+
+forecast_layer <- function(fit, h = 4) {
+  fit %>%
+    forecast(h = h) %>%
+    append_row(-1) %>%
+    mutate(
+      n = case_when(is.na(n) ~ mrdp_ci, .default = n),
+      .mean = case_when(is.na(.mean) ~ mrdp$n, .default = .mean)
+    ) %>%
+    as_fable(c(".mean"), "n") %>%
+    autolayer()
+}
+```
+
+### Performance checking 
 
 ```{r}
 fit_perf <- function(fit, actual) {
@@ -144,7 +170,8 @@ forecast_perf <- function(forecast, actual, model_name) {
   print(sprintf("Test RMSE: %f", rmse))
   print(sprintf("Test MAE: %f", mae))
 
-  model_perfs <<- model_perfs %>% bind_rows(tibble(model = model_name, RMSE = rmse, MAE = mae))
+  model_perfs <<- model_perfs %>%
+    bind_rows(tibble(model = model_name, RMSE = rmse, MAE = mae))
 
   print(test_weekly_weather_df %>%
     mutate(forecast = forecast) %>%
@@ -154,24 +181,33 @@ forecast_perf <- function(forecast, actual, model_name) {
 }
 ```
 
-## Forecast plotting
-```{r}
-mrdp <- train_weekly_df %>% tail(1)
-mrdp_ci <- distributional::dist_normal(mrdp$n, 0)
-dimnames(mrdp_ci) <- "n"
 
-forecast_layer <- function(fit, h = 4) {
-  fit %>%
-    forecast(h = h) %>%
+```{r}
+naive_fit <- train_weekly_df %>% model(NAIVE(n))
+
+naive_forecasts <- naive_fit %>% forecast(h = 4)
+
+for (i in 1:13) {
+  naive_forecasts %<>% bind_rows(
+    naive_fit %>%
+      refit(new_data = train_weekly_df %>% bind_rows(test_weekly_df %>% head(i * 4))) %>%
+      forecast(h = 4)
+  )
+}
+
+ggplot() +
+  (naive_forecasts %>%
     append_row(-1) %>%
     mutate(
       n = case_when(is.na(n) ~ mrdp_ci, .default = n),
       .mean = case_when(is.na(.mean) ~ mrdp$n, .default = .mean)
     ) %>%
     as_fable(c(".mean"), "n") %>%
-    autolayer()
-}
+    autolayer()) +
+  geom_line(data = incidence_weekly_df, aes(x = date_admitted, y = n)) +
+  scale_x_yearweek("Week", limits = c(as.Date("2018-01-01"), as.Date("2019-12-31")))
 ```
+
 
 
 ## Mean
@@ -216,8 +252,8 @@ smean_forecast <- train_weekly_df %>%
   group_by(week) %>%
   summarise(
     smean = mean(n),
-    w_smean = weighted.mean(n, year_w),
-    w_exp_smean = weighted.mean(n, year_w_exp)
+    smean_w = weighted.mean(n, year_w),
+    smean_w_exp = weighted.mean(n, year_w_exp)
   ) %>%
   mutate(
     date_admitted = seq.Date(
@@ -239,7 +275,7 @@ smean_forecast %>%
   scale_y_continuous("Incidence") +
   ggtitle("4 week forecast - Seasonal mean")
 
-ggsave("forecast_mean_4w.svg", width = 10, height = 7)
+ggsave("forecast_smean_4w.svg", width = 10, height = 7)
 
 forecast_perf(
   smean_forecast %>% head(4) %>% as_tibble() %>% pull(smean),
@@ -248,13 +284,13 @@ forecast_perf(
 )
 
 forecast_perf(
-  smean_forecast %>% head(4) %>% as_tibble() %>% pull(w_smean),
+  smean_forecast %>% head(4) %>% as_tibble() %>% pull(smean_w),
   test_weekly_weather_df %>% pull(n),
   "Seasonal mean weighted"
 )
 
 forecast_perf(
-  smean_forecast %>% head(4) %>% as_tibble() %>% pull(w_exp_smean),
+  smean_forecast %>% head(4) %>% as_tibble() %>% pull(smean_w_exp),
   test_weekly_weather_df %>% pull(n),
   "Seasonal mean exponentially weighted"
 )
