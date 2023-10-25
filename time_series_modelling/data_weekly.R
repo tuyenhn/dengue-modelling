@@ -34,7 +34,7 @@ hcmc_shp <- read_rds("../gadm/gadm41_VNM_1_pk.rds") %>%
 hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
 
 # temperature and precipitation from ERA5
-raw_weather <- read_ncdf("../../meteorological data/ECMWF/iago/T2m_RH_TP_1999_2022_L2.nc") %>%
+raw_weather <- read_ncdf("../T2m_RH_TP_1999_2022_L2.nc") %>%
   st_set_crs(4326)
 
 hcmc_temp_df <- raw_weather %>%
