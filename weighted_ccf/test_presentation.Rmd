@@ -1,0 +1,145 @@
+---
+title: "Test presentation"
+author: Tuyen Huynh
+date: "24/10/2023"
+output: beamer_presentation
+theme: "Hannover"
+---
+
+```{r include=FALSE}
+source("../time_series_modelling/data_weekly.R")
+theme_set(theme_bw())
+```
+
+# Data description
+
+## Epidemiological data
+
+-   **Source**: Ho Chi Minh City CDC
+-   **Temporal coverage**: 2000 -- 2022 (inclusive)
+    -   **Train set**: 2000 -- 2017
+    -   **Validation set**: 2018
+    -   **Test set**: 2019
+-   **Format**: Weekly aggregated admission
+    -   Raw format is line listing -- each case admission is one row
+-   **Spatial coverage**: Ho Chi Minh City
+-   In-patient cases only
+    -   out-patient data is only available from 2017
+
+------------------------------------------------------------------------
+
+```{r, incidence time series, fig.height=7, fig.width=12, echo=FALSE, fig.cap="Dengue weekly incidence time series"}
+ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
+  geom_line() +
+  scale_x_yearweek(
+    "Date",
+    breaks = yearweek(paste0(seq(2000, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(2000, 2023, 1))
+  ) +
+  scale_y_continuous("Case admitted")
+```
+
+------------------------------------------------------------------------
+
+```{r, incidence splits, fig.height=7, fig.width=12, echo=FALSE, fig.cap="Train - validation - test set splits"}
+incidence_weekly_df %>%
+  filter_index("2000 W01" ~ "2019 W52") %>%
+  ggplot(aes(x = date_admitted, y = n)) +
+  geom_line() +
+  geom_vline(xintercept = as.Date(yearweek("2018 W01")), color = "red") +
+  geom_vline(xintercept = as.Date(yearweek("2019 W01")), color = "red") +
+  scale_x_yearweek(
+    "Date",
+    breaks = yearweek(paste0(seq(2000, 2020, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(2000, 2020, 1))
+  ) +
+  scale_y_continuous("Case admitted")
+```
+
+## Meteorological data
+
+-   **Source**: ERA5 -- ECMWF atmospheric reanalysis (5th gen)
+    -   **Variables**: 2m temperature, total precipitation, relative humidity
+    -   All variables are daily aggregated
+-   **Temporal coverage**: 1999 -- 2022 (inclusive)
+    -   **Train set**: 2000 -- 2017
+    -   **Validation set**: 2018
+    -   **Test set**: 2019
+-   Temporal resolution: Daily
+-   Spatial coverage: Ho Chi Minh City\*
+
+*\* cropped by Ho Chi Minh City 10km buffer bounding box and then spatially aggregated in R*
+
+---
+
+```{r message=FALSE, fig.cap='Weekly average 2m temperature', fig.width=12, fig.height=7, warning=FALSE, include=FALSE}
+hcmc_temp_df %>%
+  ggplot(aes(x = date, y = t2m)) +
+  geom_line() +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs")) +
+  scale_x_yearweek(
+    "Date",
+    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(1999, 2023, 1))
+  ) +
+  scale_y_continuous("Degree Celsius", breaks = seq(22, 32, 2))
+```
+
+---
+
+```{r fig.height=7, fig.width=12, echo=FALSE, fig.cap="Weekly total precipitation"}
+hcmc_precip_df %>%
+  ggplot(aes(x = date, y = precip)) +
+  geom_line() +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs")) +
+  scale_x_yearweek(
+    "Week",
+    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(1999, 2023, 1))
+  ) +
+  scale_y_continuous("Millimeters")
+```
+
+---
+
+```{r fig.height=7, fig.width=12, echo=FALSE, fig.cap="Weekly average relative humidity"}
+hcmc_rh_df %>%
+  ggplot(aes(x = date, y = rh)) +
+  geom_line() +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs")) +
+  scale_x_yearweek(
+    "Week",
+    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(1999, 2023, 1))
+  ) +
+  scale_y_continuous("Percent")
+```
+
+
+## Getting up
+
+-   Turn off alarm
+-   Get out of bed
+
+## Breakfast
+
+-   Eat eggs
+-   Drink coffee
+
+# In the evening
+
+## Dinner
+
+-   Eat spaghetti
+-   Drink wine
+
+------------------------------------------------------------------------
+
+```{r, cars, fig.cap="A scatterplot.", echo=FALSE}
+plot(cars)
+```
+
+## Going to sleep
+
+-   Get in bed
+-   Count sheep

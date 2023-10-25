@@ -1,0 +1,523 @@
+---
+output: 
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: journal
+---
+
+**Knitted at: `r Sys.time()`**
+
+# Libraries
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(magrittr)
+
+library(feasts)
+library(tsibble)
+library(fable.prophet)
+library(fabletools)
+library(fable)
+
+library(lubridate)
+
+library(zoo)
+
+library(pbapply)
+library(parallel)
+```
+
+# Settings
+```{r}
+theme_set(theme_bw())
+```
+
+
+# Data ingestion
+
+```{r}
+source("../time_series_modelling/data_weekly.R")
+```
+
+
+## Incidence data
+
+```{r}
+ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
+  geom_line() +
+  scale_x_yearweek(
+    "Date",
+    breaks = yearweek(paste0(seq(2000, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(2000, 2023, 1))
+  ) +
+  scale_y_continuous("Case admitted") +
+  ggtitle("Dengue weekly incidence")
+```
+
+### Train val test split
+```{r}
+incidence_weekly_df %>%
+  filter_index("2000 W01" ~ "2019 W52") %>%
+  ggplot(aes(x = date_admitted, y = n)) +
+  geom_line() +
+  geom_vline(xintercept = as.Date(yearweek("2018 W01")), color = "red") +
+  geom_vline(xintercept = as.Date(yearweek("2019 W01")), color = "red") +
+  scale_x_yearweek(
+    "Date",
+    breaks = yearweek(paste0(seq(2000, 2020, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(2000, 2020, 1))
+  ) +
+  scale_y_continuous("Case admitted") +
+  ggtitle("Dengue weekly incidence")
+```
+
+## HCMC shape
+
+```{r}
+ggplot() +
+  geom_sf(data = hcmc_shp_w_buff) +
+  geom_sf(data = hcmc_shp)
+```
+
+## Weather data
+
+
+```{r}
+raw_weather
+```
+
+### Temperature data
+
+```{r}
+hcmc_temp_df %>%
+  ggplot(aes(x = date, y = t2m)) +
+  geom_line() +
+  geom_smooth() +
+  scale_x_yearweek("Week") +
+  scale_y_continuous("2m temperature") +
+  ggtitle("Weekly 2m temperature ERA5 reanalysis")
+
+hist(hcmc_temp_df$t2m)
+hist(hcmc_temp_df$scaled_t2m)
+```
+
+### Precipitation data
+
+```{r}
+hcmc_precip_df %>%
+  ggplot(aes(x = date, y = precip)) +
+  geom_line() +
+  geom_smooth() +
+  scale_x_yearweek("Week") +
+  scale_y_continuous("Total precipitation") +
+  ggtitle("Weekly Total precipitation ERA5 reanalysis")
+
+hist(hcmc_precip_df$precip)
+hist(hcmc_precip_df$scaled_precip)
+```
+
+### Humidity data
+
+```{r}
+hcmc_rh_df %>%
+  ggplot(aes(x = date, y = rh)) +
+  geom_line() +
+  geom_smooth() +
+  scale_x_yearweek("Week") +
+  scale_y_continuous("Total precipitation") +
+  ggtitle("Weekly Total precipitation ERA5 reanalysis")
+
+hist(hcmc_rh_df$rh)
+hist(hcmc_rh_df$scaled_rh)
+```
+
+```{r}
+incidence_weekly_weather_df
+```
+
+# Performance checking framework
+
+```{r}
+model_perfs <- tibble(
+  model = character(),
+  RMSE = numeric(),
+  MAE = numeric()
+)
+
+forecast_perf <- function(fit, newdata, model_name, plot = TRUE, res_print = TRUE, res_df = FALSE) {
+  forecast <- fit %>%
+    predict(newdata = newdata) %>%
+    as.vector() %>%
+    exp()
+  actual <- newdata$n
+
+  if (plot) {
+    forecast %>% plot(type = "l")
+  }
+
+  rmse <- sqrt(mean((actual - forecast)^2))
+  mae <- mean(abs(actual - forecast))
+
+  if (res_print) {
+    print(model_name)
+    print(sprintf("Test RMSE: %f", rmse))
+    print(sprintf("Test MAE: %f", mae))
+  }
+
+
+  if (!res_df) {
+    model_perfs <<- model_perfs %>%
+      bind_rows(tibble(model = model_name, RMSE = rmse, MAE = mae))
+  }
+
+  if (plot) {
+    print(newdata %>%
+      mutate(forecast = forecast, actual = actual) %>%
+      ggplot(aes(x = date_admitted)) +
+      geom_line(aes(y = actual)) +
+      geom_line(aes(y = forecast), color = "red"))
+  }
+
+  if (res_df) {
+    return(tibble(model = model_name, RMSE = rmse, MAE = mae))
+  }
+}
+```
+
+
+
+# Alpha
+
+## Accumulation function
+```{r}
+tsibble_rollsum <- function(df, varcol, datecol, alpha = 10) {
+  alpha_df <- zoo(df %>% pull(varcol), df %>% pull(datecol))
+  alpha_df %>%
+    rollsum(k = alpha) %>%
+    timetk::tk_tbl() %>%
+    as_tsibble(index = "index")
+}
+```
+
+## Hyperparameter tuning
+
+### Function
+```{r}
+alpha_apply <- function(row, covarDf, varcol) {
+  alpha <- row["alphas"]
+  lag <- row["lags"]
+
+  rollsum_df <-
+    incidence_weekly_df %>%
+    left_join(
+      tsibble_rollsum(covarDf, varcol, "date", alpha = alpha),
+      by = c("date_admitted" = "index")
+    ) %>%
+    mutate(
+      value = lag(value, lag)
+    )
+
+  train_df <- rollsum_df %>%
+    filter_index("2000 W01" ~ "2017 W52")
+
+  test_df <- rollsum_df %>%
+    filter_index("2018 W01" ~ "2018 W52")
+
+  fit <- glm(
+    n ~ date_admitted + value,
+    family = poisson(), data = train_df
+  )
+
+  forecast_perf(
+    fit, test_df, sprintf("alpha=%d, lag=%d", alpha, lag),
+    plot = FALSE, res_print = FALSE, res_df = TRUE
+  )
+}
+
+hyper_grid <- function(covarDf, varcol) {
+  # param grid
+  lags <- 0:52
+  alphas <- 1:52
+
+  param_grid <- expand.grid(lags = lags, alphas = alphas)
+
+  # cluster setup
+  cl <- makeCluster(6)
+  clusterEvalQ(cl, suppressPackageStartupMessages(library("tidyverse")))
+  clusterEvalQ(cl, library("zoo"))
+  clusterEvalQ(cl, library("tsibble"))
+  clusterExport(cl, ls(globalenv()))
+
+  # hyperparam grid tuning
+  apply_res <- pbapply::pbapply(
+    param_grid, 1, alpha_apply,
+    cl = cl, covarDf = covarDf, varcol = varcol
+  )
+
+  # teardown
+  stopCluster(cl)
+
+  apply_res %>%
+    list_c() %>%
+    mutate(
+      alpha = str_match(model, ".+=(\\d+).+=.+")[, 2] %>% as.numeric(),
+      lag = str_match(model, ".+=.+=(\\d+)")[, 2] %>% as.numeric()
+    )
+}
+
+
+
+alpha_precip_perfs <- hyper_grid(covarDf = hcmc_precip_df, varcol = "precip")
+alpha_temp_perfs <- hyper_grid(covarDf = hcmc_temp_df, varcol = "t2m")
+alpha_rh_perfs <- hyper_grid(covarDf = hcmc_rh_df, varcol = "rh")
+```
+
+
+```{r}
+best_precip_param <- alpha_precip_perfs %>% filter(RMSE == min(RMSE))
+alpha_precip_perfs %>%
+  ggplot(aes(x = lag, y = alpha)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_precip_param, shape = 4, color = "red") +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Accumulated weeks (alpha)") +
+  ggtitle("Accumulation and lag effect on precipitation, 52-week forecast RMSE")
+best_precip_param
+```
+
+```{r}
+best_t2m_param <- alpha_temp_perfs %>% filter(RMSE == min(RMSE))
+alpha_temp_perfs %>%
+  ggplot(aes(x = lag, y = alpha)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_t2m_param, shape = 4, color = "red") +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Accumulated weeks (alpha)") +
+  ggtitle("Accumulation and lag effect on 2m temperature, 52-week forecast RMSE")
+best_t2m_param
+```
+
+```{r}
+best_rh_param <- alpha_rh_perfs %>% filter(RMSE == min(RMSE))
+alpha_rh_perfs %>%
+  ggplot(aes(x = lag, y = alpha)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_rh_param, shape = 4, color = "red") +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Accumulated weeks (alpha)") +
+  ggtitle("Accumulation and lag effect on relative humidity, 52-week forecast RMSE")
+best_rh_param
+```
+
+
+## Testing
+```{r}
+accum_precip_df <- tsibble_rollsum(hcmc_precip_df, "precip", "date", alpha = 18) %>%
+  mutate(value = lag(value, 13)) %>%
+  rename(precip = value)
+
+accum_t2m_df <- tsibble_rollsum(hcmc_temp_df, "t2m", "date", alpha = 20) %>%
+  mutate(value = lag(value, 50)) %>%
+  rename(t2m = value)
+
+accum_rh_df <- tsibble_rollsum(hcmc_rh_df, "rh", "date", alpha = 6) %>%
+  mutate(value = lag(value, 37)) %>%
+  rename(rh = value)
+
+accum_lagged_df <- accum_precip_df %>%
+  left_join(accum_t2m_df) %>%
+  left_join(accum_rh_df)
+accum_lagged_df
+```
+
+```{r}
+train_weekly_accum_df <- incidence_weekly_df %>%
+  left_join(accum_lagged_df, by = c("date_admitted" = "index")) %>%
+  filter_index("2000 W06" ~ "2017 W52")
+
+test_weekly_accum_df <- incidence_weekly_df %>%
+  left_join(accum_lagged_df, by = c("date_admitted" = "index")) %>%
+  filter_index("2019 W01" ~ "2019 W04")
+```
+
+```{r}
+poisson_fit <- glm(
+  n ~ date_admitted + t2m + precip + rh,
+  family = poisson(), data = train_weekly_weather_df
+)
+
+poisson_accum_lagged_fit <- glm(
+  n ~ date_admitted + t2m + precip + rh,
+  family = poisson(), data = train_weekly_accum_df
+)
+
+
+forecast_perf(
+  poisson_fit, test_weekly_weather_df %>% head(4), "Poisson t2m + precip + rh"
+)
+
+forecast_perf(
+  poisson_accum_lagged_fit, test_weekly_accum_df, "Poisson accum lagged t2m + precip + rh"
+)
+```
+
+
+# Beta
+
+```{r}
+ref_seq <- hcmc_temp_df %>% head(11)
+
+kernel <- dnorm(seq(-1, 1, length.out = 11), sd = 11)
+
+convolve(ref_seq$t2m, kernel, type = "filter")
+
+
+beta_df <- zoo(hcmc_temp_df$t2m, hcmc_temp_df$date)
+beta_df %<>%
+  rollapply(width = 11, align = "center", FUN = convolve, y = kernel, type = "filter") %>%
+  timetk::tk_tbl() %>%
+  as_tsibble(index = "index")
+beta_df
+
+
+incidence_weekly_df %>%
+  left_join(hcmc_temp_df, by = c("date_admitted" = "date")) %>%
+  CCF(n, t2m, lag_max = 52) %>%
+  autoplot()
+
+incidence_weekly_df %>%
+  left_join(beta_df, by = c("date_admitted" = "index")) %>%
+  CCF(n, value, lag_max = 52) %>%
+  autoplot()
+```
+
+```{r}
+tsibble_rollapply <- function(df, varcol, datecol, kernel, width = 11, align = "center") {
+  beta_df <- zoo(df %>% pull(varcol), hcmc_temp_df %>% pull(datecol))
+  beta_df %>%
+    rollapply(
+      width = width, align = "center",
+      FUN = convolve, y = kernel, type = "filter"
+    ) %>%
+    timetk::tk_tbl() %>%
+    as_tsibble(index = "index")
+}
+```
+
+
+```{r}
+beta_perfs <- tibble(
+  model = character(),
+  RMSE = numeric(),
+  MAE = numeric()
+)
+
+for (i in 1:30) {
+  rollapply_df <-
+    incidence_weekly_df %>%
+    left_join(
+      tsibble_rollapply(
+        hcmc_temp_df, "t2m", "date",
+        kernel = dnorm(seq(-1, 1, length.out = 13), sd = i / 10), width = 13
+      ),
+      by = c("date_admitted" = "index")
+    )
+
+
+  train_df <- rollapply_df %>%
+    filter_index("2000 W01" ~ "2018 W52")
+
+  test_df <- rollapply_df %>%
+    filter_index("2019 W01" ~ "2019 W04")
+
+  lagged_fit <- glm(
+    n ~ date_admitted + value,
+    family = poisson(), data = train_df
+  )
+
+  beta_perfs %<>% bind_rows(
+    forecast_perf(
+      lagged_fit, test_df$n,
+      newdata = test_df, sprintf("beta sd=%d", i),
+      plot = FALSE, res_print = FALSE, res_df = TRUE
+    )
+  )
+}
+```
+
+```{r}
+beta_perfs %>%
+  mutate(beta = str_extract(model, "\\d+$") %>% as.numeric()) %>%
+  ggplot(aes(x = beta / 10, y = RMSE)) +
+  geom_col() +
+  scale_x_continuous(breaks = seq(0, 3, 0.5), minor_breaks = NULL)
+```
+
+# Alpha + Beta
+```{r}
+func <- function(alpha, beta) {
+  alpha_df <- tsibble_rollsum(hcmc_temp_df, "t2m", "date", alpha = alpha) %>%
+    rename(alpha_val = value)
+  beta_df <- tsibble_rollapply(
+    hcmc_temp_df, "t2m", "date",
+    kernel = dnorm(seq(-1, 1, length.out = 13), sd = beta), width = 13
+  ) %>%
+    rename(beta_val = value)
+
+  transformed_df <- incidence_weekly_df %>%
+    left_join(alpha_df, by = c("date_admitted" = "index")) %>%
+    left_join(beta_df, by = c("date_admitted" = "index"))
+
+  train_df <- transformed_df %>%
+    filter_index("2000 W01" ~ "2018 W52")
+
+  test_df <- transformed_df %>%
+    filter_index("2019 W01" ~ "2019 W04")
+
+  glm_fit <- glm(
+    n ~ date_admitted + alpha_val + beta_val,
+    family = poisson(), data = train_df
+  )
+
+  forecast <- glm_fit %>% predict(newdata = test_df)
+  actual <- test_df$n
+
+  sqrt(mean((actual - forecast)^2))
+}
+```
+
+
+```{r}
+# param_grid <- expand.grid(1:52, 1:30) %>%
+#   as_tibble() %>%
+#   rename(alpha = Var1, beta = Var2) %>%
+#   mutate(beta = beta / 10) %>%
+#   mutate(rmse = func(alpha, beta))
+
+res_mat <- matrix(NA, nrow = length(1:52), ncol = length(1:30))
+
+pb <- progress::progress_bar$new(total = length(1:52) * length(1:30))
+for (i in 1:52) {
+  for (j in 1:30) {
+    res_mat[i, j] <- func(i, j / 10)
+    pb$tick()
+  }
+}
+
+
+res_mat %>% write_rds("res_mat.rds")
+
+res_mat %>%
+  as_tibble() %>%
+  rename_with(.fn = \(x) paste0("beta", as.character(1:30))) %>%
+  mutate(alpha = 1:52, .before = "beta1") %>%
+  pivot_longer(-alpha, names_to = "beta", values_to = "rmse") %>%
+  mutate(beta = parse_number(beta) / 10) %>%
+  ggplot(aes(x = beta, y = alpha)) +
+  geom_tile(aes(fill = rmse)) +
+  scale_fill_viridis_c(direction = -1)
+```
