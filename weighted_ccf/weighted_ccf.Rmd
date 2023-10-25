@@ -277,6 +277,7 @@ alpha_rh_perfs <- alpha_hyper_grid(hcmc_rh_df, "rh")
 # alpha_rh_perfs %>% write_rds("./grid_perfs/alpha_rh_perfs.rds")
 ```
 
+### Results
 
 ```{r}
 best_precip_param <- alpha_precip_perfs %>% filter(RMSE == min(RMSE))
@@ -398,6 +399,8 @@ incidence_weekly_df %>%
   CCF(n, value, lag_max = 52) %>%
   autoplot()
 ```
+
+## Delay function
 
 ```{r}
 tsibble_rollapply <- function(df, varcol, datecol, kernel, width = 11, align = "center") {
