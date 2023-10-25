@@ -214,9 +214,7 @@ alpha_apply <- function(row, covarDf, varcol) {
       tsibble_rollsum(covarDf, varcol, "date", alpha = alpha),
       by = c("date_admitted" = "index")
     ) %>%
-    mutate(
-      value = lag(value, lag)
-    )
+    mutate(value = lag(value, lag))
 
   train_df <- rollsum_df %>%
     filter_index("2000 W01" ~ "2017 W52")
@@ -426,37 +424,37 @@ models_res %>%
 # Beta
 
 ```{r}
-ref_seq <- hcmc_temp_df %>% head(11)
-
-kernel <- dnorm(seq(-1, 1, length.out = 11), sd = 11)
-
-convolve(ref_seq$t2m, kernel, type = "filter")
-
-
-beta_df <- zoo(hcmc_temp_df$t2m, hcmc_temp_df$date)
-beta_df %<>%
-  rollapply(width = 11, align = "center", FUN = convolve, y = kernel, type = "filter") %>%
-  timetk::tk_tbl() %>%
-  as_tsibble(index = "index")
-beta_df
-
-
-incidence_weekly_df %>%
-  left_join(hcmc_temp_df, by = c("date_admitted" = "date")) %>%
-  CCF(n, t2m, lag_max = 52) %>%
-  autoplot()
-
-incidence_weekly_df %>%
-  left_join(beta_df, by = c("date_admitted" = "index")) %>%
-  CCF(n, value, lag_max = 52) %>%
-  autoplot()
+# ref_seq <- hcmc_temp_df %>% head(11)
+#
+# kernel <- dnorm(seq(-5, 5), sd = 1.1)
+#
+# convolve(ref_seq$t2m, kernel, type = "filter")
+#
+#
+# beta_df <- zoo(hcmc_temp_df$t2m, hcmc_temp_df$date)
+# beta_df %<>%
+#   rollapply(width = 11, align = "center", FUN = convolve, y = kernel, type = "filter") %>%
+#   timetk::tk_tbl() %>%
+#   as_tsibble(index = "index")
+# beta_df
+#
+#
+# incidence_weekly_df %>%
+#   left_join(hcmc_temp_df, by = c("date_admitted" = "date")) %>%
+#   CCF(n, t2m, lag_max = 52) %>%
+#   autoplot()
+#
+# incidence_weekly_df %>%
+#   left_join(beta_df, by = c("date_admitted" = "index")) %>%
+#   CCF(n, value, lag_max = 52) %>%
+#   autoplot()
 ```
 
 ## Delay function
 
 ```{r}
 tsibble_rollapply <- function(df, varcol, datecol, kernel, width = 11, align = "center") {
-  beta_df <- zoo(df %>% pull(varcol), hcmc_temp_df %>% pull(datecol))
+  beta_df <- zoo(df %>% pull(varcol), df %>% pull(datecol))
   beta_df %>%
     rollapply(
       width = width, align = "center",
@@ -467,54 +465,213 @@ tsibble_rollapply <- function(df, varcol, datecol, kernel, width = 11, align = "
 }
 ```
 
+## Hyperparameter tuning
+
+### Function
 
 ```{r}
-beta_perfs <- tibble(
-  model = character(),
-  RMSE = numeric(),
-  MAE = numeric()
-)
+beta_apply <- function(row, covarDf, varcol) {
+  beta <- row["betas"]
+  lag <- row["lags"]
 
-for (i in 1:30) {
+  gauss_kernel <- dnorm(seq(-5, 5), sd = beta)
+
   rollapply_df <-
     incidence_weekly_df %>%
     left_join(
-      tsibble_rollapply(
-        hcmc_temp_df, "t2m", "date",
-        kernel = dnorm(seq(-1, 1, length.out = 13), sd = i / 10), width = 13
-      ),
+      tsibble_rollapply(covarDf, varcol, "date", kernel = gauss_kernel),
       by = c("date_admitted" = "index")
-    )
+    ) %>%
+    mutate(value = lag(value, lag))
 
 
   train_df <- rollapply_df %>%
-    filter_index("2000 W01" ~ "2018 W52")
+    filter_index("2000 W01" ~ "2017 W52")
 
   test_df <- rollapply_df %>%
-    filter_index("2019 W01" ~ "2019 W04")
+    filter_index("2018 W01" ~ "2018 W52")
 
-  lagged_fit <- glm(
+  fit <- glm(
     n ~ date_admitted + value,
     family = poisson(), data = train_df
   )
 
-  beta_perfs %<>% bind_rows(
-    forecast_perf(
-      lagged_fit, test_df$n,
-      newdata = test_df, sprintf("beta sd=%d", i),
-      plot = FALSE, res_print = FALSE, res_df = TRUE
-    )
+  forecast_perf(
+    fit, test_df, sprintf("beta=%d, lag=%d", beta * 10, lag),
+    plot = FALSE, res_print = FALSE, res_df = TRUE
   )
 }
+
+beta_hyper_grid <- function(covarDf, varcol) {
+  # param grid
+  lags <- 0:52
+  betas <- 1:30
+
+  param_grid <- expand.grid(lags = lags, betas = betas / 10)
+
+  # cluster setup
+  cl <- makeCluster(6)
+  clusterEvalQ(cl, suppressPackageStartupMessages(library("tidyverse")))
+  clusterEvalQ(cl, library("zoo"))
+  clusterEvalQ(cl, library("tsibble"))
+  clusterExport(cl, ls(globalenv()))
+
+  # hyperparam grid tuning
+  apply_res <- pbapply::pbapply(
+    param_grid, 1, beta_apply,
+    cl = cl, covarDf = covarDf, varcol = varcol
+  )
+
+  # teardown
+  stopCluster(cl)
+
+  apply_res %>%
+    list_c() %>%
+    mutate(
+      beta = str_match(model, ".+=(\\d+).+=.+")[, 2] %>% as.numeric() / 10,
+      lag = str_match(model, ".+=.+=(\\d+)")[, 2] %>% as.numeric(),
+    )
+}
+
+
+
+
+beta_precip_perfs <- beta_hyper_grid(hcmc_precip_df, "precip")
+beta_temp_perfs <- beta_hyper_grid(hcmc_temp_df, "t2m")
+beta_rh_perfs <- beta_hyper_grid(hcmc_rh_df, "rh")
+
+# beta_precip_perfs %>% write_rds("./grid_perfs/beta_precip_perfs.rds")
+# beta_temp_perfs %>% write_rds("./grid_perfs/beta_temp_perfs.rds")
+# beta_rh_perfs %>% write_rds("./grid_perfs/beta_rh_perfs.rds")
+```
+
+### Results
+
+```{r}
+best_precip_param <- beta_precip_perfs %>% filter(RMSE == min(RMSE))
+beta_precip_perfs %>%
+  ggplot(aes(x = lag, y = beta)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_precip_param, shape = 4, color = "red") +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Gaussian standard deviation (beta)") +
+  ggtitle("Delay and lag effect on precipitation, 52-week forecast RMSE")
+best_precip_param
 ```
 
 ```{r}
-beta_perfs %>%
-  mutate(beta = str_extract(model, "\\d+$") %>% as.numeric()) %>%
-  ggplot(aes(x = beta / 10, y = RMSE)) +
-  geom_col() +
-  scale_x_continuous(breaks = seq(0, 3, 0.5), minor_breaks = NULL)
+best_t2m_param <- beta_temp_perfs %>% filter(RMSE == min(RMSE))
+beta_temp_perfs %>%
+  ggplot(aes(x = lag, y = beta)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_t2m_param, shape = 4, color = "red") +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Gaussian standard deviation (beta)") +
+  ggtitle("Delay and lag effect on 2m temperature, 52-week forecast RMSE")
+best_t2m_param
 ```
+
+```{r}
+best_rh_param <- beta_rh_perfs %>% filter(RMSE == min(RMSE))
+beta_rh_perfs %>%
+  ggplot(aes(x = lag, y = beta)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_rh_param, shape = 4, color = "red") +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Gaussian standard deviation (beta)") +
+  ggtitle("Delay and lag effect on relative humidity, 52-week forecast RMSE")
+best_rh_param
+```
+
+## Testing
+
+### Delayed + lagged df
+```{r}
+delay_precip_df <- tsibble_rollapply(
+  hcmc_precip_df, "precip", "date",
+  kernel = dnorm(seq(-5, 5), sd = 3)
+) %>%
+  mutate(value = lag(value, 13)) %>%
+  rename(precip = value)
+
+delay_t2m_df <- tsibble_rollapply(
+  hcmc_temp_df, "t2m", "date",
+  kernel = dnorm(seq(-5, 5), sd = 3)
+) %>%
+  mutate(value = lag(value, 48)) %>%
+  rename(t2m = value)
+
+delay_rh_df <- tsibble_rollapply(
+  hcmc_rh_df, "rh", "date",
+  kernel = dnorm(seq(-5, 5), sd = 1.8)
+) %>%
+  mutate(value = lag(value, 36)) %>%
+  rename(rh = value)
+
+delay_lagged_df <- delay_precip_df %>%
+  left_join(delay_t2m_df) %>%
+  left_join(delay_rh_df)
+delay_lagged_df
+```
+
+```{r}
+train_weekly_delay_df <- incidence_weekly_df %>%
+  left_join(delay_lagged_df, by = c("date_admitted" = "index")) %>%
+  filter_index("2000 W01" ~ "2017 W52")
+
+test_weekly_delay_df <- incidence_weekly_df %>%
+  left_join(delay_lagged_df, by = c("date_admitted" = "index")) %>%
+  filter_index("2019 W01" ~ "2019 W04")
+```
+
+### Testing framework
+
+```{r}
+settings <- list(
+  list(train_weekly_weather_df, test_weekly_weather_df %>% head(4), "Poisson"),
+  list(train_weekly_delay_df, test_weekly_delay_df, "Poisson delayed lagged")
+)
+
+model_pars <- expand.grid(formula = formulas, setting = settings) %>%
+  as_tibble() %>%
+  rowid_to_column() %>%
+  unnest(setting) %>%
+  mutate(name = rep(c("train", "test", "base_model_name"), n() / 3)) %>%
+  pivot_wider(id_cols = c(rowid, formula), values_from = setting) %>%
+  mutate(base_model_name = unlist(base_model_name))
+
+cl <- makeCluster(6)
+clusterEvalQ(cl, suppressPackageStartupMessages(library("tidyverse")))
+clusterExport(cl, c("forecast_perf"))
+
+models_res <- pbapply::pbapply(model_pars, 1, poisson_fit, cl = cl) %>% list_c()
+
+stopCluster(cl)
+
+models_res
+
+# models_res %>% write_csv("./grid_perfs/beta_poisson_perfs.csv")
+```
+
+### Results comparison
+
+```{r}
+models_res %>%
+  mutate(type = case_when(
+    startsWith(model, "Poisson delayed lagged") ~ "Poisson delayed lagged",
+    .default = "Poisson"
+  )) %>%
+  group_by(type) %>%
+  mutate(mean_rmse = mean(RMSE)) %>%
+  ggplot() +
+  geom_col(aes(y = model, x = RMSE)) +
+  geom_vline(aes(xintercept = mean_rmse), color = "red") +
+  facet_wrap(~type, ncol = 1, scales = "free_y")
+```
+
 
 # Alpha + Beta
 ```{r}

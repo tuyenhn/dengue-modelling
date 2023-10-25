@@ -19,11 +19,18 @@ library(zoo)
 
 source("../time_series_modelling/data_weekly.R")
 theme_set(theme_bw())
+
+# alpha perfs
 alpha_precip_perfs <- read_rds("./grid_perfs/alpha_precip_perfs.rds")
 alpha_temp_perfs <- read_rds("./grid_perfs/alpha_temp_perfs.rds")
 alpha_rh_perfs <- read_rds("./grid_perfs/alpha_rh_perfs.rds")
+alpha_models_res <- read_csv("./grid_perfs/alpha_poisson_perfs.csv")
+# beta perfs
+beta_precip_perfs <- read_rds("./grid_perfs/beta_precip_perfs.rds")
+beta_temp_perfs <- read_rds("./grid_perfs/beta_temp_perfs.rds")
+beta_rh_perfs <- read_rds("./grid_perfs/beta_rh_perfs.rds")
+beta_models_res <- read_csv("./grid_perfs/beta_poisson_perfs.csv")
 
-models_res <- read_csv("./grid_perfs/alpha_poisson_perfs.csv")
 
 
 tsibble_rollsum <- function(df, varcol, datecol, alpha = 10) {
@@ -218,16 +225,16 @@ alpha_rh_perfs %>%
 ```{r}
 #| label: tbl-alpha_effect_results
 #| tbl-cap: Poisson regression models with and without accumulation effect RMSE
-knitr::kable(models_res)
+knitr::kable(alpha_models_res)
 ```
 
 ---
 
 ```{r}
 #| label: fig-alpha_effect_results_plot
-#| fig-cap: Poisson regression models with and without accumulation effect RMSE
+#| fig-cap: Poisson lagged regression models with and without accumulation effect RMSE
 #| echo: false
-models_res %>%
+alpha_models_res %>%
   mutate(type = case_when(
     startsWith(model, "Poisson accum lagged") ~ "Poisson with accumulation and lagged effect",
     .default = "Poisson"
@@ -247,12 +254,95 @@ models_res %>%
 
 ## Description {.smaller}
 
--   At every lag $k$ for covariables, we perform a summation weighted by a kernel. The shape of this kernel will be defined by $\beta$.
+-   At every lag $k$ for covariables, we perform an average weighted by a kernel. The shape of this kernel will be defined by $\beta$.
 -   We call this the delay effect transformation. $\beta$ and $k$ are hyperparameters that will be tuned to find the best value (based on forecast RMSE).
 
 ![Delay effect](./delay_effect.png)
 
 --- 
+
+-   Other possible hyperparameters are (1) the kernel that is being used and (2) the width of the lag window, i.e. the number of time points around a lag.
+-   For the moment, the kernel being used is a Gaussian kernel (or filter), and the lag window width is 11.
+
+## Hyperparameter tuning results
+
+```{r}
+#| label: fig-t2m_beta_res
+#| fig-cap: Delay and lag effect on 2m temperature, 52-week forecast RMSE
+#| echo: false
+best_t2m_param <- beta_temp_perfs %>% filter(RMSE == min(RMSE))
+beta_temp_perfs %>%
+  ggplot(aes(x = lag, y = beta)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_t2m_param, shape = 4, color = "red", size = 2, stroke = 1) +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Gaussian standard deviation (beta)")
+```
+
+------------------------------------------------------------------------
+
+```{r}
+#| label: fig-precip_beta_res
+#| fig-cap: Delay and lag effect on precipitation, 52-week forecast RMSE
+#| echo: false
+best_precip_param <- beta_precip_perfs %>% filter(RMSE == min(RMSE))
+beta_precip_perfs %>%
+  ggplot(aes(x = lag, y = beta)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_precip_param, shape = 4, color = "red", size = 2, stroke = 1) +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Gaussian standard deviation (beta)")
+```
+
+------------------------------------------------------------------------
+
+```{r}
+#| label: fig-rh_beta_res
+#| fig-cap: Delay and lag effect on relative humidity, 52-week forecast RMSE
+#| echo: false
+best_rh_param <- beta_rh_perfs %>% filter(RMSE == min(RMSE))
+beta_rh_perfs %>%
+  ggplot(aes(x = lag, y = beta)) +
+  geom_tile(aes(fill = RMSE)) +
+  geom_point(data = best_rh_param, shape = 4, color = "red", size = 2, stroke = 1) +
+  scale_fill_viridis_c() +
+  scale_x_continuous("Lagged weeks", breaks = seq(0, 50, 10)) +
+  scale_y_continuous("Gaussian standard deviation (beta)")
+```
+
+## Testing {.smaller}
+
+-   Same set up as before, with delayed and lagged covariables instead.
+
+```{r}
+#| label: tbl-beta_effect_results
+#| tbl-cap: Poisson lagged regression models with and without delayed effect RMSE
+knitr::kable(beta_models_res)
+```
+
+---
+
+```{r}
+#| label: fig-beta_effect_results_plot
+#| fig-cap: Poisson lagged regression models with and without delayed effect RMSE
+#| echo: false
+beta_models_res %>%
+  mutate(type = case_when(
+    startsWith(model, "Poisson delayed lagged") ~ "Poisson with delayed and lagged effect",
+    .default = "Poisson"
+  )) %>%
+  group_by(type) %>%
+  mutate(mean_rmse = mean(RMSE)) %>%
+  ggplot() +
+  geom_col(aes(y = model, x = RMSE)) +
+  geom_vline(aes(xintercept = mean_rmse), color = "red") +
+  scale_x_continuous("Root Mean Squared Error (RMSE)", breaks = seq(0, 800, 100)) +
+  scale_y_discrete("Model configuration") +
+  facet_wrap(~type, ncol = 1, scales = "free_y")
+```
+
 
 
 

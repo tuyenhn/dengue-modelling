@@ -535,7 +535,7 @@ Tuyen Huynh
 <section class="slide level2">
 
 
-<img data-src="test_presentation_files/figure-revealjs/fig-alpha_effect_results_plot-1.png" width="1152" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;9<strong>.</strong> Poisson regression models with and without accumulation effect RMSE</p></section></section>
+<img data-src="test_presentation_files/figure-revealjs/fig-alpha_effect_results_plot-1.png" width="1152" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;9<strong>.</strong> Poisson lagged regression models with and without accumulation effect RMSE</p></section></section>
 <section>
 <section id="delay-effect-beta" class="title-slide slide level1 center">
 <h1>Delay effect (beta)</h1>
@@ -544,11 +544,138 @@ Tuyen Huynh
 <section id="description-1" class="slide level2 smaller">
 <h2>Description</h2>
 <ul>
-<li>At every lag <span class="math inline">\(k\)</span> for covariables, we perform a summation weighted by a kernel. The shape of this kernel will be defined by <span class="math inline">\(\beta\)</span>.</li>
+<li>At every lag <span class="math inline">\(k\)</span> for covariables, we perform an average weighted by a kernel. The shape of this kernel will be defined by <span class="math inline">\(\beta\)</span>.</li>
 <li>We call this the delay effect transformation. <span class="math inline">\(\beta\)</span> and <span class="math inline">\(k\)</span> are hyperparameters that will be tuned to find the best value (based on forecast RMSE).</li>
 </ul>
 
 <img data-src="./delay_effect.png" class="r-stretch quarto-figure-center"><p class="caption">Delay effect</p></section>
+<section class="slide level2">
+
+<ul>
+<li>Other possible hyperparameters are (1) the kernel that is being used and (2) the width of the lag window, i.e.&nbsp;the number of time points around a lag.</li>
+<li>For the moment, the kernel being used is a Gaussian kernel (or filter), and the lag window width is 11.</li>
+</ul>
+</section>
+<section id="hyperparameter-tuning-results-1" class="slide level2">
+<h2>Hyperparameter tuning results</h2>
+
+<img data-src="test_presentation_files/figure-revealjs/fig-t2m_beta_res-1.png" width="1152" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;10<strong>.</strong> Delay and lag effect on 2m temperature, 52-week forecast RMSE</p></section>
+<section class="slide level2">
+
+
+<img data-src="test_presentation_files/figure-revealjs/fig-precip_beta_res-1.png" width="1152" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;11<strong>.</strong> Delay and lag effect on precipitation, 52-week forecast RMSE</p></section>
+<section class="slide level2">
+
+
+<img data-src="test_presentation_files/figure-revealjs/fig-rh_beta_res-1.png" width="1152" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;12<strong>.</strong> Delay and lag effect on relative humidity, 52-week forecast RMSE</p></section>
+<section id="testing-1" class="slide level2 smaller">
+<h2>Testing</h2>
+<ul>
+<li>Same set up as before, with delayed and lagged covariables instead.</li>
+</ul>
+<div class="cell">
+<div class="cell-output-display">
+<div id="tbl-beta_effect_results">
+<table>
+<caption>Table&nbsp;2<strong>.</strong> Poisson lagged regression models with and without delayed effect RMSE</caption>
+<thead>
+<tr class="header">
+<th style="text-align: left;">model</th>
+<th style="text-align: right;">RMSE</th>
+<th style="text-align: right;">MAE</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Poisson +</td>
+<td style="text-align: right;">789.3303</td>
+<td style="text-align: right;">786.6196</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson + t2m</td>
+<td style="text-align: right;">747.4958</td>
+<td style="text-align: right;">743.4616</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Poisson + precip</td>
+<td style="text-align: right;">817.8763</td>
+<td style="text-align: right;">815.2686</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson + rh</td>
+<td style="text-align: right;">878.3925</td>
+<td style="text-align: right;">875.2133</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Poisson + t2m + precip</td>
+<td style="text-align: right;">757.9642</td>
+<td style="text-align: right;">754.0686</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson + t2m + rh</td>
+<td style="text-align: right;">815.8854</td>
+<td style="text-align: right;">812.1731</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Poisson + precip + rh</td>
+<td style="text-align: right;">886.1628</td>
+<td style="text-align: right;">881.4128</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson + t2m + precip + rh</td>
+<td style="text-align: right;">827.1417</td>
+<td style="text-align: right;">821.8177</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Poisson delayed lagged +</td>
+<td style="text-align: right;">789.3303</td>
+<td style="text-align: right;">786.6196</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson delayed lagged + t2m</td>
+<td style="text-align: right;">753.0016</td>
+<td style="text-align: right;">747.9215</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Poisson delayed lagged + precip</td>
+<td style="text-align: right;">792.3395</td>
+<td style="text-align: right;">788.5630</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson delayed lagged + rh</td>
+<td style="text-align: right;">821.8080</td>
+<td style="text-align: right;">816.7889</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Poisson delayed lagged + t2m + precip</td>
+<td style="text-align: right;">784.3485</td>
+<td style="text-align: right;">780.1255</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson delayed lagged + t2m + rh</td>
+<td style="text-align: right;">798.3705</td>
+<td style="text-align: right;">792.2538</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Poisson delayed lagged + precip + rh</td>
+<td style="text-align: right;">795.6040</td>
+<td style="text-align: right;">791.6469</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson delayed lagged + t2m + precip + rh</td>
+<td style="text-align: right;">786.7691</td>
+<td style="text-align: right;">782.4484</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</section>
+<section class="slide level2">
+
+
+<img data-src="test_presentation_files/figure-revealjs/fig-beta_effect_results_plot-1.png" width="1152" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;13<strong>.</strong> Poisson lagged regression models with and without delayed effect RMSE</p></section>
 <section id="going-to-sleep" class="slide level2">
 <h2>Going to sleep</h2>
 <ul>
