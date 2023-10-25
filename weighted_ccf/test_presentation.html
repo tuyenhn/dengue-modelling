@@ -427,6 +427,37 @@ Tuyen Huynh
 
 
 <img data-src="test_presentation_files/figure-revealjs/fig-rh_alpha_res-1.png" width="1152" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;8<strong>.</strong> Accumulation and lag effect on relative humidity, 52-week forecast RMSE</p></section>
+<section id="testing" class="slide level2">
+<h2>Testing</h2>
+<ul>
+<li>Now we fit 2 Poisson regression models, one model will have untransformed non-lagged covariables, the other model will have accumulated and lagged covariables. The forecast horizon will be 4 weeks (i.e.&nbsp;week 1-4 in 2019)</li>
+</ul>
+<div class="cell">
+<div class="cell-output-display">
+<table>
+<thead>
+<tr class="header">
+<th style="text-align: left;">model</th>
+<th style="text-align: right;">rmse</th>
+<th style="text-align: right;">mae</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Poisson + raw covariables</td>
+<td style="text-align: right;">827.1417</td>
+<td style="text-align: right;">821.8177</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson + accumulated, lagged covariables</td>
+<td style="text-align: right;">756.4607</td>
+<td style="text-align: right;">752.7249</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
 <section id="going-to-sleep" class="slide level2">
 <h2>Going to sleep</h2>
 <ul>
