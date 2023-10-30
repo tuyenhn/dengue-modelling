@@ -147,9 +147,8 @@ model_perfs <- tibble(
 
 forecast_perf <- function(fit, newdata, model_name, plot = TRUE, res_print = TRUE, res_df = FALSE) {
   forecast <- fit %>%
-    predict(newdata = newdata) %>%
-    as.vector() %>%
-    exp()
+    predict(newdata = newdata, type = "response") %>%
+    as.vector()
   actual <- newdata$n
 
   if (plot) {
@@ -185,6 +184,47 @@ forecast_perf <- function(fit, newdata, model_name, plot = TRUE, res_print = TRU
 }
 ```
 
+# Lag effect
+
+## Hyperparamter tuning
+
+### Function
+
+```{r}
+lag_apply <- function(k, covarDf, varcol) {
+  lagged_df <- incidence_weekly_df %>%
+    left_join(
+      covarDf %>% mutate(lagged_value = get(varcol) %>% lag(k)),
+      by = c("date_admitted" = "date")
+    )
+
+  train_df <- lagged_df %>%
+    filter_index("2000 W01" ~ "2017 W52")
+
+  test_df <- lagged_df %>%
+    filter_index("2018 W01" ~ "2018 W04")
+
+  fit <- glm(
+    n ~ date_admitted + lagged_value,
+    family = poisson(), data = train_df
+  )
+
+  forecast_perf(
+    fit, test_df, sprintf("lag=%d", k),
+    plot = FALSE, res_print = FALSE, res_df = TRUE
+  )
+}
+
+lagged_precip_df <- pbapply::pblapply(
+  c(0:52), lag_apply,
+  covarDf = hcmc_precip_df, varcol = "precip"
+) %>%
+  list_c() %>%
+  mutate(lag = str_extract(model, "\\d+") %>% as.numeric())
+
+lagged_precip_df %>% ggplot() +
+  geom_col(aes(x = lag, y = RMSE))
+```
 
 
 # Alpha
@@ -220,7 +260,7 @@ alpha_apply <- function(row, covarDf, varcol) {
     filter_index("2000 W01" ~ "2017 W52")
 
   test_df <- rollsum_df %>%
-    filter_index("2018 W01" ~ "2018 W52")
+    filter_index("2018 W01" ~ "2018 W04")
 
   fit <- glm(
     n ~ date_admitted + value,
@@ -489,7 +529,7 @@ beta_apply <- function(row, covarDf, varcol) {
     filter_index("2000 W01" ~ "2017 W52")
 
   test_df <- rollapply_df %>%
-    filter_index("2018 W01" ~ "2018 W52")
+    filter_index("2018 W01" ~ "2018 W04")
 
   fit <- glm(
     n ~ date_admitted + value,
