@@ -1,0 +1,172 @@
+---
+output: html_document
+---
+
+# Libraries
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tscount)
+
+library(parallel)
+```
+
+# Settings
+```{r}
+theme_set(theme_bw())
+```
+
+
+# Data ingestion
+
+```{r}
+source("../time_series_modelling/data_weekly.R")
+```
+
+# Framework
+Goal: forecast 4 weeks at a time, with different starting points within a year
+How:
+  - Recursive multi-step forecasting (recursive MISO), predicts week-1 using the past 4 observed values, use that prediction + past 3 observed values as the new input to predict week-2, repeat for week-3 and week-4
+  - Direct multistep forecasting (direct MISO), predicts week-1, week-2, ..., week-4 independently, using the 4 different models, one trained to predict 1 week ahead, one trained to predict 2 weeks ahead, etc.
+
+## Recursive MISO - recursive multi-step forecasting
+
+### Functions
+
+```{r}
+recur_miso <- function(train_set, test_set, cl = NULL) {
+  if (!missing(cl)) {
+    clusterEvalQ(cl, suppressPackageStartupMessages(library(magrittr)))
+    clusterEvalQ(cl, suppressPackageStartupMessages(library(dplyr)))
+    clusterEvalQ(cl, library(tscount))
+    clusterExport(cl, c("train_set", "test_set"), environment())
+  }
+
+  pbapply::pblapply(seq(1, 49, 3), \(start_idx) {
+    train_df <- train_set %>%
+      bind_rows(test_set %>% slice_head(n = start_idx)) %>%
+      tail(nrow(train_set))
+
+    fit <- tsglm(train_df$n, model = list(past_obs = 1:4), link = "log", distr = "poisson")
+    pred <- predict(fit, 4, newobs = NULL)
+
+    tibble(
+      startweek = start_idx,
+      actualweek = start_idx + 0:3,
+      preds = pred$pred,
+      lowers = pred$interval[, "lower"],
+      uppers = pred$interval[, "upper"],
+    )
+  }, cl = cl) %>% list_c()
+}
+
+
+forecast_layer <- function(frcst_df) {
+  # frcst_df <- forecast_df
+  frcst_df %<>% group_by(startweek) %>% group_split()
+
+  layers <- lapply(
+    frcst_df,
+    \(df)
+    c(layer(
+      data = df,
+      geom = "ribbon", stat = "identity", position = "identity",
+      mapping = aes(x = date, ymin = lowers, ymax = uppers),
+      params = list(alpha = 0.5, fill = "pink")
+    ), layer(
+      data = df,
+      geom = "line", stat = "identity", position = "identity",
+      mapping = aes(x = date, y = preds), params = list(color = "red")
+    ))
+  )
+}
+```
+
+### Forecast
+```{r}
+cl <- makeCluster(4)
+pred_results <- recur_miso(train_weekly_df, val_weekly_df, cl = cl)
+stopCluster(cl)
+
+recur_miso_forecast_df <- pred_results %>%
+  mutate(date = yearweek(paste0("2018 W", actualweek)), .before = everything())
+
+
+ggplot(val_weekly_df) +
+  geom_line(aes(x = date_admitted, y = n)) +
+  forecast_layer(recur_miso_forecast_df) +
+  scale_x_yearweek(
+    breaks = as.Date(val_weekly_df$date_admitted[seq(1, 52, 3)]),
+    date_labels = "W%W",
+    minor_breaks = NULL
+  )
+```
+
+### Performance
+
+```{r}
+rmse <- sqrt(mean((forecast_df$preds - val_weekly_df$n)^2))
+rmse
+```
+
+## Direct MISO - direct multistep forecasting
+### Functions
+```{r}
+direct_miso <- function(train_set, test_set, cl = NULL) {
+  if (!missing(cl)) {
+    clusterEvalQ(cl, suppressPackageStartupMessages(library(magrittr)))
+    clusterEvalQ(cl, suppressPackageStartupMessages(library(dplyr)))
+    clusterEvalQ(cl, library(tscount))
+    clusterExport(cl, c("train_set", "test_set"), environment())
+  }
+
+  pbapply::pblapply(seq(1, 49, 3), \(start_idx) {
+    train_df <- train_set %>%
+      bind_rows(test_set %>% slice_head(n = start_idx)) %>%
+      tail(nrow(train_set))
+
+    four_step_res <- lapply(0:3, \(i) {
+      model <- list(past_obs = i + 1:4)
+      fit <- tsglm(train_df$n, model)
+      pred <- predict(fit, i + 1)
+
+      tibble(
+        startweek = start_idx,
+        actualweek = start_idx + i,
+        preds = pred$pred %>% tail(1),
+        lowers = pred$interval[, "lower"] %>% tail(1),
+        uppers = pred$interval[, "upper"] %>% tail(1)
+      )
+    })
+
+    four_step_res %>% list_c()
+  }) %>%
+    list_c()
+}
+```
+
+### Forecast
+```{r}
+cl <- makeCluster(4)
+pred_results <- direct_miso(train_weekly_df, val_weekly_df, cl = cl)
+stopCluster(cl)
+
+direct_miso_forecast_df <- pred_results %>%
+  mutate(date = yearweek(paste0("2018 W", actualweek)), .before = everything())
+
+ggplot(val_weekly_df) +
+  geom_line(aes(x = date_admitted, y = n)) +
+  forecast_layer(direct_miso_forecast_df) +
+  scale_x_yearweek(
+    breaks = as.Date(val_weekly_df$date_admitted[seq(1, 49, 3)]),
+    date_labels = "W%W",
+    minor_breaks = NULL
+  )
+```
+
+### Performance
+
+```{r}
+rmse <- sqrt(mean((direct_miso_forecast_df$preds - val_weekly_df$n)^2))
+rmse
+```
