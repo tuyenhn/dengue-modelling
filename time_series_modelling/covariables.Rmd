@@ -1,0 +1,78 @@
+```{r}
+source("../data_weekly.R", chdir = TRUE)
+```
+
+# Weather data
+
+```{r}
+raw_weather
+```
+
+## Temperature data
+
+```{r}
+hcmc_temp_df %>%
+  ggplot(aes(x = date, y = t2m)) +
+  geom_line() +
+  geom_smooth() +
+  scale_x_yearweek(
+    "Date",
+    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(1999, 2023, 1))
+  ) +
+  scale_y_continuous("Temperature (°C)") +
+  ggtitle("Weekly mean 2m temperature - ERA5 reanalysis")
+
+ggsave("./svgs/weekly_t2m_ts.svg", width = 10, height = 7)
+
+hist(hcmc_temp_df$t2m)
+
+hist(hcmc_temp_df$scaled_t2m)
+```
+
+## Precipitation data
+
+```{r}
+hcmc_precip_df %>%
+  ggplot(aes(x = date, y = precip)) +
+  geom_line() +
+  geom_smooth() +
+  scale_x_yearweek(
+    "Date",
+    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(1999, 2023, 1))
+  ) +
+  scale_y_continuous("Precipitation (mm)") +
+  ggtitle("Weekly total precipitation ERA5 - reanalysis")
+
+ggsave("./svgs/weekly_precip_ts.svg", width = 10, height = 7)
+
+hist(hcmc_precip_df$precip)
+hist(hcmc_precip_df$scaled_precip)
+```
+
+## Humidity data
+
+```{r}
+hcmc_rh_df %>%
+  ggplot(aes(x = date, y = rh)) +
+  geom_line() +
+  geom_smooth() +
+  scale_x_yearweek(
+    "Date",
+    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
+    labels = as.character(seq(1999, 2023, 1))
+  ) +
+  scale_y_continuous("Relative Humidity (%)") +
+  ggtitle("Weekly mean relative humidity - ERA5 reanalysis")
+
+ggsave("./svgs/weekly_rh_ts.svg", width = 10, height = 7)
+
+hist(hcmc_rh_df$rh)
+hist(hcmc_rh_df$scaled_rh)
+```
+
+
+```{r}
+incidence_weekly_weather_df
+```
