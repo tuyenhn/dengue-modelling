@@ -129,8 +129,8 @@
 <text x='633.67' y='483.74' text-anchor='middle' style='font-size: 8.80px;fill: #4D4D4D; font-family: "Arial";' textLength='19.58px' lengthAdjust='spacingAndGlyphs'>2021</text>
 <text x='659.21' y='483.74' text-anchor='middle' style='font-size: 8.80px;fill: #4D4D4D; font-family: "Arial";' textLength='19.58px' lengthAdjust='spacingAndGlyphs'>2022</text>
 <text x='684.75' y='483.74' text-anchor='middle' style='font-size: 8.80px;fill: #4D4D4D; font-family: "Arial";' textLength='19.58px' lengthAdjust='spacingAndGlyphs'>2023</text>
-<text x='376.28' y='496.20' text-anchor='middle' style='font-size: 11.00px; font-family: "Arial";' textLength='27.92px' lengthAdjust='spacingAndGlyphs'>Week</text>
-<text transform='translate(13.36,247.84) rotate(-90)' text-anchor='middle' style='font-size: 11.00px; font-family: "Arial";' textLength='85.63px' lengthAdjust='spacingAndGlyphs'>Total precipitation</text>
-<text x='38.03' y='14.93' style='font-size: 13.20px; font-family: "Arial";' textLength='250.26px' lengthAdjust='spacingAndGlyphs'>Weekly Total precipitation ERA5 reanalysis</text>
+<text x='376.28' y='496.20' text-anchor='middle' style='font-size: 11.00px; font-family: "Arial";' textLength='23.24px' lengthAdjust='spacingAndGlyphs'>Date</text>
+<text transform='translate(13.36,247.84) rotate(-90)' text-anchor='middle' style='font-size: 11.00px; font-family: "Arial";' textLength='89.27px' lengthAdjust='spacingAndGlyphs'>Precipitation (mm)</text>
+<text x='38.03' y='14.93' style='font-size: 13.20px; font-family: "Arial";' textLength='255.63px' lengthAdjust='spacingAndGlyphs'>Weekly total precipitation ERA5 - reanalysis</text>
 </g>
 </svg>
