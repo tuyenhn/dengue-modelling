@@ -20,7 +20,7 @@ theme_set(theme_bw())
 # Data ingestion
 
 ```{r}
-suppressPackageStartupMessages(source("../data_weekly.R", chdir = TRUE))
+suppressPackageStartupMessages(source("../time_series_modelling/data_weekly.R"))
 ```
 
 # Framework
@@ -84,7 +84,6 @@ forecast_layer <- function(frcst_df) {
       mapping = aes(x = date, y = preds), params = list(color = "red")
     ))
   )
-  layers
 }
 ```
 
