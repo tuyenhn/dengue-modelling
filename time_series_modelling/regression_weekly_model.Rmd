@@ -13,19 +13,8 @@ output:
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
 library(magrittr)
-
+library(tscount)
 library(feasts)
-library(tsibble)
-library(fable.prophet)
-library(fabletools)
-library(fable)
-
-library(lubridate)
-
-library(ggdist)
-
-library(sf)
-library(stars)
 ```
 
 # Settings
@@ -37,110 +26,52 @@ theme_set(theme_bw())
 # Data ingestion
 
 ```{r}
-source("./data_weekly.R")
+source("../data_weekly.R", chdir = TRUE)
 ```
 
 
 ## Incidence data
 
 ```{r}
-ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
-  geom_line() +
-  scale_x_yearweek(
-    "Date",
-    breaks = yearweek(paste0(seq(2000, 2023, 1), " W01")), minor_breaks = NULL,
-    labels = as.character(seq(2000, 2023, 1))
-  ) +
-  scale_y_continuous("Case admitted") +
-  ggtitle("Dengue weekly incidence")
+# ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
+#   geom_line() +
+#   scale_x_yearweek(
+#     "Date",
+#     breaks = yearweek(paste0(seq(2000, 2023, 1), " W01")), minor_breaks = NULL,
+#     labels = as.character(seq(2000, 2023, 1))
+#   ) +
+#   scale_y_continuous("Case admitted") +
+#   ggtitle("Dengue weekly incidence")
 
-ggsave("weekly_incidence_ts.svg", width = 12, height = 7)
+# ggsave("weekly_incidence_ts.svg", width = 12, height = 7)
 ```
 
 ### Train test split
 ```{r}
-incidence_weekly_df %>%
-  filter_index("2000 W01" ~ "2019 W52") %>%
-  ggplot(aes(x = date_admitted, y = n)) +
-  geom_line() +
-  geom_vline(xintercept = as.Date(yearweek("2019 W01")), color = "red") +
-  scale_x_yearweek(
-    "Date",
-    breaks = yearweek(paste0(seq(2000, 2020, 1), " W01")), minor_breaks = NULL,
-    labels = as.character(seq(2000, 2020, 1))
-  ) +
-  scale_y_continuous("Case admitted") +
-  ggtitle("Dengue weekly incidence")
+# incidence_weekly_df %>%
+#   filter_index("2000 W01" ~ "2019 W52") %>%
+#   ggplot(aes(x = date_admitted, y = n)) +
+#   geom_line() +
+#   geom_vline(xintercept = as.Date(yearweek("2019 W01")), color = "red") +
+#   scale_x_yearweek(
+#     "Date",
+#     breaks = yearweek(paste0(seq(2000, 2020, 1), " W01")), minor_breaks = NULL,
+#     labels = as.character(seq(2000, 2020, 1))
+#   ) +
+#   scale_y_continuous("Case admitted") +
+#   ggtitle("Dengue weekly incidence")
 
-ggsave("weekly_incidence_split_ts.svg", width = 12, height = 7)
+# ggsave("weekly_incidence_split_ts.svg", width = 12, height = 7)
 ```
-
-
-## HCMC shape
-
-```{r}
-ggplot() +
-  geom_sf(data = hcmc_shp_w_buff) +
-  geom_sf(data = hcmc_shp)
-```
-
-## Weather data
-
-```{r}
-raw_weather
-```
-
-### Temperature data
-
-```{r}
-hcmc_temp_df %>%
-  ggplot(aes(x = date, y = t2m)) +
-  geom_line() +
-  geom_smooth() +
-  scale_x_yearweek(
-    "Date",
-    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
-    labels = as.character(seq(1999, 2023, 1))
-  ) +
-  scale_y_continuous("2m temperature", breaks = seq(22, 32, 2)) +
-  ggtitle("Weekly 2m temperature ERA5 reanalysis")
-
-ggsave("weekly_t2m_ts.svg", width = 10, height = 7)
-
-hist(hcmc_temp_df$t2m)
-hist(hcmc_temp_df$scaled_t2m)
-```
-
-### Precipitation data
-
-```{r}
-hcmc_precip_df %>%
-  ggplot(aes(x = date, y = precip)) +
-  geom_line() +
-  geom_smooth() +
-  scale_x_yearweek(
-    "Week",
-    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
-    labels = as.character(seq(1999, 2023, 1))
-  ) +
-  scale_y_continuous("Total precipitation") +
-  ggtitle("Weekly Total precipitation ERA5 reanalysis")
-
-ggsave("weekly_precip_ts.svg", width = 10, height = 7)
-
-MASS::boxcox(lm(precip ~ date, data = hcmc_precip_df))
-
-hist(hcmc_precip_df$precip)
-hist(hcmc_precip_df$precip %>% sqrt())
-hist(hcmc_precip_df$scaled_precip)
-```
-
 
 
 ```{r}
-incidence_weekly_weather_df
-```
+train_weekly_df <- train_weekly_df %>% bind_rows(val_weekly_df)
+train_weekly_df %>% tail()
 
+train_weekly_weather_df <- train_weekly_weather_df %>% bind_rows(val_weekly_weather_df)
+train_weekly_weather_df %>% tail()
+```
 
 # Correlation analysis
 
@@ -164,31 +95,27 @@ incidence_weekly_weather_df %>%
   autoplot()
 
 incidence_weekly_weather_df %>%
-  mutate(precip_lagged = lag(precip, 10)) %>%
+  mutate(precip_lagged = lag(precip, 13)) %>%
   filter(year(date_admitted) < 2019) %>%
   CCF(n, precip_lagged, lag_max = 52) %>%
-  autoplot()
-
-incidence_weekly_weather_df %>%
-  CCF(n, date_admitted, lag_max = 52) %>%
   autoplot()
 ```
 
 ```{r}
-train_weekly_weather_df <- incidence_weekly_weather_df %>%
-  mutate(
-    t2m_lagged = lag(t2m, 27),
-    precip_lagged = lag(precip, 10)
-  ) %>%
-  filter_index("2000 W01" ~ "2018 W52")
-
-test_weekly_weather_df <- incidence_weekly_weather_df %>%
-  mutate(
-    t2m_lagged = lag(t2m, 27),
-    precip_lagged = lag(precip, 10)
-  ) %>%
-  filter(year(date_admitted) == 2019) %>%
-  head(4)
+# train_weekly_weather_df <- incidence_weekly_weather_df %>%
+#   mutate(
+#     t2m_lagged = lag(t2m, 27),
+#     precip_lagged = lag(precip, 10)
+#   ) %>%
+#   filter_index("2000 W01" ~ "2018 W52")
+#
+# test_weekly_weather_df <- incidence_weekly_weather_df %>%
+#   mutate(
+#     t2m_lagged = lag(t2m, 27),
+#     precip_lagged = lag(precip, 10)
+#   ) %>%
+#   filter(year(date_admitted) == 2019) %>%
+#   head(4)
 ```
 
 # Modelling
@@ -196,45 +123,13 @@ test_weekly_weather_df <- incidence_weekly_weather_df %>%
 ## Performance checking framework
 
 ```{r}
-fit_perf <- function(fit, actual) {
-  print(summary(fit))
-
-  fitted <- fitted(fit)
-
-  fitted %>% plot(type = "l")
-
-  print(sprintf(
-    "Train RMSE: %f",
-    sqrt(mean((actual - fitted)^2))
-  ))
-  print(sprintf(
-    "Train MAE: %f",
-    mean(abs(actual - fitted))
-  ))
-
-  print(train_weekly_weather_df %>%
-    mutate(fitted = fitted) %>%
-    ggplot(aes(x = date_admitted)) +
-    geom_line(aes(y = n)) +
-    geom_line(aes(y = fitted), color = "red"))
-}
-
 model_perfs <- tibble(
   model = character(),
   RMSE = numeric(),
   MAE = numeric()
 )
 
-forecast_perf <- function(fit, actual, model_name, newdata = NULL, plot = TRUE) {
-  forecast <- fit %>%
-    predict(newdata = newdata) %>%
-    as.vector() %>%
-    exp()
-
-  if (plot) {
-    forecast %>% plot(type = "l")
-  }
-
+forecast_perf <- function(forecast, actual, model_name) {
   rmse <- sqrt(mean((actual - forecast)^2))
   mae <- mean(abs(actual - forecast))
 
@@ -243,14 +138,80 @@ forecast_perf <- function(fit, actual, model_name, newdata = NULL, plot = TRUE) 
 
   model_perfs <<- model_perfs %>%
     bind_rows(tibble(model = model_name, RMSE = rmse, MAE = mae))
+}
+```
 
-  if (plot) {
-    print(test_weekly_weather_df %>%
-      mutate(forecast = forecast) %>%
-      ggplot(aes(x = date_admitted)) +
-      geom_line(aes(y = n)) +
-      geom_line(aes(y = forecast), color = "red"))
+## Model fitting and forecast framework
+
+
+```{r}
+recur_miso <- function(
+    train_set, test_set,
+    start_indices,
+    model = list(), xreg_names = NULL,
+    horizon = 4, distr = c("poisson", "nbinom"),
+    cl = NULL) {
+  if (!missing(cl)) {
+    clusterEvalQ(cl, suppressPackageStartupMessages(library(magrittr)))
+    clusterEvalQ(cl, suppressPackageStartupMessages(library(dplyr)))
+    clusterEvalQ(cl, library(tscount))
+    clusterExport(cl, c("train_set", "test_set"), environment())
   }
+  distr <- match.arg(distr)
+
+  pbapply::pblapply(start_indices, \(start_idx) {
+    train_df <- train_set %>%
+      bind_rows(test_set %>% slice_head(n = start_idx)) %>%
+      tail(nrow(train_set))
+    if (!is.null(xreg_names)) {
+      xreg <- train_df %>%
+        as_tibble() %>%
+        select(all_of(xreg_names)) %>%
+        as.matrix()
+      newxreg <- test_set %>%
+        tail(52 - start_idx) %>%
+        head(horizon) %>%
+        as_tibble() %>%
+        select(all_of(xreg_names)) %>%
+        as.matrix()
+    } else {
+      xreg <- NULL
+      newxreg <- NULL
+    }
+
+    fit <- tsglm(train_df$n, model = model, link = "log", distr = distr, xreg = xreg)
+    pred <- predict(fit, horizon, newobs = NULL, newxreg = newxreg)
+
+    tibble(
+      startweek = start_idx,
+      actualweek = start_idx + (1:horizon - 1),
+      preds = (pred$pred),
+      lowers = (pred$interval[, "lower"]),
+      uppers = (pred$interval[, "upper"]),
+    )
+  }, cl = cl) %>% list_c()
+}
+
+
+forecast_layer <- function(frcst_df) {
+  # frcst_df <- forecast_df
+  frcst_df %<>% group_by(startweek) %>% group_split()
+
+  layers <- lapply(
+    frcst_df,
+    \(df)
+    c(layer(
+      data = df,
+      geom = "ribbon", stat = "identity", position = "identity",
+      mapping = aes(x = date, ymin = lowers, ymax = uppers),
+      params = list(alpha = 0.5, fill = "pink")
+    ), layer(
+      data = df,
+      geom = "line", stat = "identity", position = "identity",
+      mapping = aes(x = date, y = preds), params = list(color = "red")
+    ))
+  )
+  layers
 }
 ```
 
@@ -258,11 +219,27 @@ forecast_perf <- function(fit, actual, model_name, newdata = NULL, plot = TRUE) 
 ## Poisson
 
 ```{r}
-poisson_fit <- glm(
-  n ~ date_admitted + t2m + precip,
-  family = poisson(), data = train_weekly_weather_df
+poi_covar_preds <- recur_miso(
+  train_weekly_weather_df, test_weekly_weather_df,
+  seq(1, 49, 3),
+  distr = "poisson"
 )
 
+poi_covar_forecast_df <- poi_covar_preds %>%
+  mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
+
+ggplot(test_weekly_df) +
+  geom_line(aes(x = date_admitted, y = n)) +
+  forecast_layer(poi_covar_forecast_df) +
+  scale_x_yearweek(
+    breaks = as.Date(test_weekly_df$date_admitted[seq(1, 52, 3)]),
+    date_labels = "W%W",
+    minor_breaks = NULL
+  )
+```
+
+
+```{r}
 fit_perf(poisson_fit, train_weekly_weather_df$n)
 
 forecast <- tsibble(
