@@ -4,8 +4,6 @@ library(tsibble)
 library(sf)
 library(stars)
 
-library(here)
-
 # incidence data
 incidence_raw <- read_csv("incidence_ts_in.csv", show_col_types = FALSE) %>%
   mutate(date_admitted = as.Date(date_admitted)) %>%
