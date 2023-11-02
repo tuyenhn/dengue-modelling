@@ -2,6 +2,43 @@
 source("../data_weekly.R", chdir = TRUE)
 ```
 
+# Misc
+
+```{r}
+plot_covar <- function(covar_df, scale_y_label, title, extra_layers = list()) {
+  covar_name <- names(covar_df)[[2]]
+
+  covar_df %>%
+    ggplot(aes(x = date, y = .data[[covar_name]])) +
+    geom_line() +
+    geom_smooth() +
+    scale_x_yearweek(
+      "Date",
+      breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
+      labels = as.character(seq(1999, 2023, 1))
+    ) +
+    scale_y_continuous(scale_y_label) +
+    ggtitle(title) +
+    extra_layers
+}
+
+gen_covar_df <- function(covar_name, agg_fn, trans_fn = identity) {
+  raw_weather %>%
+    select(all_of(covar_name)) %>%
+    aggregate("1 week", FUN = agg_fn) %>%
+    aggregate(hcmc_shp_w_buff, FUN = agg_fn) %>%
+    as_tibble() %>%
+    select(time, covar_name) %>%
+    mutate(
+      date = as.Date(time) %>% yearweek(),
+      !!covar_name := trans_fn(!!rlang::sym(covar_name))
+    ) %>%
+    select(date, covar_name) %>%
+    as_tsibble(index = date)
+}
+```
+
+
 # Weather data
 
 ```{r}
@@ -11,68 +48,134 @@ raw_weather
 ## Temperature data
 
 ```{r}
-hcmc_temp_df %>%
-  ggplot(aes(x = date, y = t2m)) +
-  geom_line() +
-  geom_smooth() +
-  scale_x_yearweek(
-    "Date",
-    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
-    labels = as.character(seq(1999, 2023, 1))
-  ) +
-  scale_y_continuous("Temperature (°C)") +
-  ggtitle("Weekly mean 2m temperature - ERA5 reanalysis")
+plot_covar(hcmc_temp_df, "Temperature (°C)", "Weekly mean 2m temperature - ERA5 reanalysis")
 
 ggsave("./svgs/weekly_t2m_ts.svg", width = 10, height = 7)
 
 hist(hcmc_temp_df$t2m)
-
-hist(hcmc_temp_df$scaled_t2m)
 ```
 
 ## Precipitation data
 
 ```{r}
-hcmc_precip_df %>%
-  ggplot(aes(x = date, y = precip)) +
-  geom_line() +
-  geom_smooth() +
-  scale_x_yearweek(
-    "Date",
-    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
-    labels = as.character(seq(1999, 2023, 1))
-  ) +
-  scale_y_continuous("Precipitation (mm)") +
-  ggtitle("Weekly total precipitation ERA5 - reanalysis")
+plot_covar(hcmc_precip_df, "Precipitation (mm)", "Weekly total precipitation ERA5 - reanalysis")
 
 ggsave("./svgs/weekly_precip_ts.svg", width = 10, height = 7)
 
 hist(hcmc_precip_df$precip)
-hist(hcmc_precip_df$scaled_precip)
 ```
 
 ## Humidity data
 
 ```{r}
-hcmc_rh_df %>%
-  ggplot(aes(x = date, y = rh)) +
-  geom_line() +
-  geom_smooth() +
-  scale_x_yearweek(
-    "Date",
-    breaks = yearweek(paste0(seq(1999, 2023, 1), " W01")), minor_breaks = NULL,
-    labels = as.character(seq(1999, 2023, 1))
-  ) +
-  scale_y_continuous("Relative Humidity (%)") +
-  ggtitle("Weekly mean relative humidity - ERA5 reanalysis")
+plot_covar(hcmc_rh_df, "Relative Humidity (%)", "Weekly mean relative humidity - ERA5 reanalysis")
 
 ggsave("./svgs/weekly_rh_ts.svg", width = 10, height = 7)
 
 hist(hcmc_rh_df$rh)
-hist(hcmc_rh_df$scaled_rh)
 ```
 
 
 ```{r}
 incidence_weekly_weather_df
+```
+
+# Unused covariables
+
+```{r}
+(raw_weather %>% attributes())$names
+```
+
+## Specific humidity
+```{r}
+hcmc_sh_df <- gen_covar_df("sh", mean, exp)
+plot_covar(hcmc_sh_df, "Specific Humidity (g/kg)", "Weekly mean specific humidity - ERA5 reanalysis")
+
+hist(hcmc_sh_df$sh)
+```
+
+## Wind speed
+```{r}
+hcmc_ws_df <- gen_covar_df("ws", mean)
+
+plot_covar(
+  hcmc_ws_df,
+  "Wind speed intensity at 10 meters (m/s)",
+  "Weekly mean wind speed intensity - ERA5 reanalysis"
+)
+
+hist(hcmc_ws_df$ws)
+```
+
+## Hydrological balance
+
+Daily hydrological balance (Evaporation - precipitation) If `hb`>0, the area is accumulates water. If `hb` <0, the area loses water (in m)
+
+```{r}
+hcmc_hb_df <- gen_covar_df("hb", sum)
+
+plot_covar(
+  hcmc_hb_df,
+  "Hydrological balance",
+  "Weekly total hydrological balance - ERA5 reanalysis",
+  layer(
+    geom = "hline", stat = "identity", position = "identity",
+    params = list(yintercept = 0, color = "red", linetype = "dashed")
+  )
+)
+
+hist(hcmc_hb_df$hb)
+```
+
+## Solar radiation
+Accumulated solar radiation downwards. This parameter is the amount of solar radiation (also known as shortwave radiation) that reaches a horizontal plane at the surface of the Earth. It is important to highlight that this parameter comprises both direct and diffuse solar radiation. (J/m2)
+
+```{r}
+hcmc_ssdr_df <- gen_covar_df("ssdr", sum)
+
+plot_covar(
+  hcmc_ssdr_df,
+  "Accumulated solar radiation downwards (J/m²)",
+  "Weekly total accumulated solar radiation downwards - ERA5 reanalysis"
+)
+
+hist(hcmc_ssdr_df$ssdr)
+```
+
+## Maximums
+```{r}
+hcmc_mx24_df <- lapply(
+  list(
+    c("mx2t24", mean),
+    c("mxrh24", mean),
+    c("mxsh24", mean)
+  ), \(covar)
+  gen_covar_df(covar[[1]], covar[[2]])
+) %>% reduce(left_join, by = "date")
+
+plot_covar(
+  hcmc_mx24_df %>% pivot_longer(-date) %>% relocate(value, .after = date),
+  "Temperature, relative humidity and specific humidity",
+  "Weekly mean maximum temperature, relative humidity and specific humidity - ERA5 reanalysis",
+  facet_wrap(~name, ncol = 1, scales = "free_y")
+)
+```
+
+## Minimums
+```{r}
+hcmc_mn24_df <- lapply(
+  list(
+    c("mn2t24", mean),
+    c("mnrh24", mean),
+    c("mnsh24", mean)
+  ), \(covar)
+  gen_covar_df(covar[[1]], covar[[2]])
+) %>% reduce(left_join, by = "date")
+
+plot_covar(
+  hcmc_mn24_df %>% pivot_longer(-date) %>% relocate(value, .after = date),
+  "Temperature, relative humidity and specific humidity",
+  "Weekly mean minimum temperature, relative humidity and specific humidity - ERA5 reanalysis",
+  facet_wrap(~name, ncol = 1, scales = "free_y")
+)
 ```
