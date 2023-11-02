@@ -47,7 +47,6 @@ hcmc_temp_df <- raw_weather %>%
   mutate(
     date = as.Date(date) %>% yearweek(),
     t2m = t2m - 273.15,
-    scaled_t2m = scale(t2m) %>% as.double()
   ) %>%
   as_tsibble()
 
@@ -61,7 +60,6 @@ hcmc_precip_df <- raw_weather %>%
   mutate(
     date = as.Date(date) %>% yearweek(),
     precip = precip * 1000,
-    scaled_precip = scale(precip) %>% as.double()
   ) %>%
   as_tsibble()
 
@@ -72,10 +70,7 @@ hcmc_rh_df <- raw_weather %>%
   as_tibble() %>%
   select(time, rh) %>%
   rename(date = time, rh = rh) %>%
-  mutate(
-    date = as.Date(date) %>% yearweek(),
-    scaled_rh = scale(rh) %>% as.double()
-  ) %>%
+  mutate(date = as.Date(date) %>% yearweek()) %>%
   as_tsibble()
 
 hcmc_weather_df <- hcmc_temp_df %>%
