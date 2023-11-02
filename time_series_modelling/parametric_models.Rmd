@@ -16,17 +16,12 @@ library(tidyverse)
 library(magrittr)
 
 library(feasts)
-library(tsibble)
 library(fable.prophet)
 library(fabletools)
 library(fable)
 
+library(tsibble)
 library(lubridate)
-
-library(ggdist)
-
-library(sf)
-library(stars)
 
 library(parallel)
 ```
@@ -319,11 +314,71 @@ train_weekly_df %>%
   )
 ```
 
+
+## AR
+
+```{r}
+ar_fit <- forecast_chunks(
+  train_weekly_df, test_weekly_df, seq(0, 49, 3),
+  AR, n
+)
+
+forecast_plot_default(
+  ar_fit %>% mutate(across(c(.mean, uppers, lowers), exp)),
+  test_weekly_df %>% mutate(n = exp(n)),
+  "4 week forecast - AR(9-12)"
+)
+
+ggsave("./svgs/forecast_ar10.svg", width = 10, height = 7)
+```
+
+```{r}
+pre_perf <- ar_fit %>%
+  select(date_admitted, .mean) %>%
+  left_join(test_weekly_df, by = "date_admitted")
+
+forecast_perf(
+  exp(pre_perf$.mean),
+  exp(pre_perf$n), "AR(10)"
+)
+```
+
+## MA
+
+```{r}
+ma_fit <- forecast_chunks(
+  train_weekly_df, test_weekly_df, seq(0, 49, 3),
+  ARIMA, n ~ pdq(0, 0, 6) + PDQ(0, 0, 0)
+)
+
+forecast_plot_default(
+  ma_fit %>% mutate(across(c(.mean, uppers, lowers), exp)),
+  test_weekly_df %>% mutate(n = exp(n)),
+  "4 week forecast - MA(6)"
+)
+
+ggsave("./svgs/forecast_ma6.svg", width = 10, height = 7)
+```
+
+
+```{r}
+pre_perf <- ma_fit %>%
+  select(date_admitted, .mean) %>%
+  left_join(test_weekly_df, by = "date_admitted")
+
+forecast_perf(
+  exp(pre_perf$.mean),
+  exp(pre_perf$n), "MA(6)"
+)
+```
+
+
 ## ARIMA
 
 ```{r}
 arima_fit <- forecast_chunks(
-  train_weekly_df, test_weekly_df, seq(0, 49, 3), ARIMA, n ~ PDQ(0, 0, 0),
+  train_weekly_df, test_weekly_df, seq(0, 49, 3),
+  ARIMA, n ~ PDQ(0, 0, 0),
   stepwise = FALSE
 )
 
@@ -539,12 +594,13 @@ forecast_perf(
 ## SARIMA
 
 ```{r}
-cl <- makeCluster(6)
-sarima_fit <- forecast_chunks(
-  train_weekly_df, test_weekly_df, seq(0, 49, 3), ARIMA, n,
-  cl = cl
-)
-stopCluster(cl)
+# cl <- makeCluster(6)
+# sarima_fit <- forecast_chunks(
+#   train_weekly_df, test_weekly_df, seq(0, 49, 3), ARIMA, n,
+#   cl = cl
+# )
+# stopCluster(cl)
+sarima_fit <- read_rds("sarima_fit.rds")
 
 forecast_plot_default(
   sarima_fit %>% mutate(across(c(.mean, uppers, lowers), exp)),
@@ -572,62 +628,30 @@ forecast_perf(
 SARIMAX - Seasonal Auto-Regressive Integrated Moving Average with eXogenous factors
 
 ```{r}
-cl <- makeCluster(8)
-
-arimax_t2m_fit <- forecast_chunks(
-  train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, n ~ xreg(t2m),
-  stepwise = FALSE, cl = cl
-)
-arimax_t2m_fit
-
-arimax_precip_fit <- forecast_chunks(
-  train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, n ~ xreg(precip),
-  stepwise = FALSE, cl = cl
-)
-arimax_precip_fit
-
-arimax_rh_fit <- forecast_chunks(
-  train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, n ~ xreg(rh),
-  stepwise = FALSE, cl = cl
-)
-arimax_rh_fit
-
-stopCluster(cl)
-```
-
-### Forecasting
-
-```{r}
-forecast_p <- ggplot(incidence_weekly_df, aes(x = date_admitted, y = exp(n))) +
-  forecast_layer(sarimax_fits, new_data = test_weekly_weather_df) +
-  geom_line() +
-  scale_x_yearweek("Week", limits = c(as.Date("2018-01-01"), as.Date("2019-01-21"))) +
-  scale_y_continuous("Incidence") +
-  ggtitle("4 week forecast - SARIMAX")
-
-forecast_p
-
-ggsave("./svgs/forecast_sarimaxs.svg", width = 10, height = 7)
-
-forecast_p +
-  facet_wrap(~.model) +
-  scale_x_yearweek("Week", limits = c(as.Date("2018-12-01"), as.Date("2019-01-21")))
-
-ggsave("./svgs/forecast_sarimaxs_facet.svg", width = 10, height = 7)
-```
-
-```{r}
-for (model in sort(colnames(sarimax_fits))) {
-  forecast_perf(
-    sarimax_fits %>% select(all_of(model)),
-    new_data = test_weekly_weather_df,
-    as.character(model)
-  )
-  cat("\n")
-}
+# cl <- makeCluster(8)
+#
+# arimax_t2m_fit <- forecast_chunks(
+#   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
+#   ARIMA, n ~ xreg(t2m),
+#   stepwise = FALSE, cl = cl
+# )
+# arimax_t2m_fit
+#
+# arimax_precip_fit <- forecast_chunks(
+#   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
+#   ARIMA, n ~ xreg(precip),
+#   stepwise = FALSE, cl = cl
+# )
+# arimax_precip_fit
+#
+# arimax_rh_fit <- forecast_chunks(
+#   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
+#   ARIMA, n ~ xreg(rh),
+#   stepwise = FALSE, cl = cl
+# )
+# arimax_rh_fit
+#
+# stopCluster(cl)
 ```
 
 ## Prophet weekly
