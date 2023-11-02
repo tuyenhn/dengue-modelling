@@ -60,29 +60,6 @@ train_weekly_df %>% tail()
 ### Performance checking 
 
 ```{r}
-fit_perf <- function(fit, actual) {
-  print(summary(fit))
-
-  fitted <- fitted(fit)
-
-  fitted %>% plot(type = "l")
-
-  print(sprintf(
-    "Train RMSE: %f",
-    sqrt(mean((actual - fitted)^2))
-  ))
-  print(sprintf(
-    "Train MAE: %f",
-    mean(abs(actual - fitted))
-  ))
-
-  print(train_weekly_weather_df %>%
-    mutate(fitted = fitted) %>%
-    ggplot(aes(x = date_admitted)) +
-    geom_line(aes(y = n)) +
-    geom_line(aes(y = fitted), color = "red"))
-}
-
 model_perfs <- tibble(
   model = character(),
   RMSE = numeric(),
