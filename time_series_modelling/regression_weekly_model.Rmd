@@ -19,6 +19,8 @@ library(feasts)
 
 library(pbapply)
 library(parallel)
+library(foreach)
+library(doParallel)
 ```
 
 # Settings
@@ -278,18 +280,19 @@ forecast_perf(
 ### Auto lagged
 
 ```{r}
-lag_dfs <- lapply(1:52, \(lag){
-  cl <- makeCluster(4)
+unregister_dopar()
 
+cl <- makeForkCluster(9)
+registerDoParallel(cl)
+
+auto_lagged_df <-  foreach(lag = 1:52) %dopar% {
   forecast_df <- recur_miso(
     train_weekly_weather_df, test_weekly_weather_df,
     seq(1, 49, 3),
     model = list(past_obs = lag),
-    link = "log", distr = "poisson", cl = cl
+    link = "log", distr = "poisson"
   ) %>%
     mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
-
-  stopCluster(cl)
 
   pre_perf <- forecast_df %>%
     select(date, preds) %>%
@@ -299,7 +302,9 @@ lag_dfs <- lapply(1:52, \(lag){
   mae <- mean(abs(pre_perf$n - pre_perf$preds))
 
   tibble(model = sprintf("Poisson %d-week lag", lag), RMSE = rmse, MAE = mae, lag = lag)
-})
+}
+
+stopCluster(cl)
 ```
 
 
