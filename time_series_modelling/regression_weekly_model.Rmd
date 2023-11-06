@@ -14,7 +14,11 @@ output:
 library(tidyverse)
 library(magrittr)
 library(tscount)
+library(tsibble)
 library(feasts)
+
+library(pbapply)
+library(parallel)
 ```
 
 # Settings
@@ -139,6 +143,20 @@ forecast_perf <- function(forecast, actual, model_name) {
   model_perfs <<- model_perfs %>%
     bind_rows(tibble(model = model_name, RMSE = rmse, MAE = mae))
 }
+
+forecast_plot_default <- function(fit_df, actual_df, plot_title) {
+  ggplot(actual_df) +
+    geom_line(aes(x = date_admitted, y = n)) +
+    forecast_layer(fit_df) +
+    scale_x_yearweek(
+      "Date",
+      breaks = as.Date(actual_df$date_admitted[seq(1, 52, 3)]),
+      labels = as.character(actual_df$date_admitted[seq(1, 52, 3)]) %>% str_extract("W\\d+"),
+      minor_breaks = NULL
+    ) +
+    scale_y_continuous("Incidence") +
+    ggtitle(plot_title)
+}
 ```
 
 ## Model fitting and forecast framework
@@ -149,7 +167,8 @@ recur_miso <- function(
     train_set, test_set,
     start_indices,
     model = list(), xreg_names = NULL,
-    horizon = 4, distr = c("poisson", "nbinom"),
+    horizon = 4,
+    link = c("identity", "log"), distr = c("poisson", "nbinom"),
     cl = NULL) {
   if (!missing(cl)) {
     clusterEvalQ(cl, suppressPackageStartupMessages(library(magrittr)))
@@ -158,11 +177,13 @@ recur_miso <- function(
     clusterExport(cl, c("train_set", "test_set"), environment())
   }
   distr <- match.arg(distr)
+  link <- match.arg(link)
 
   pbapply::pblapply(start_indices, \(start_idx) {
     train_df <- train_set %>%
       bind_rows(test_set %>% slice_head(n = start_idx)) %>%
       tail(nrow(train_set))
+
     if (!is.null(xreg_names)) {
       xreg <- train_df %>%
         as_tibble() %>%
@@ -179,7 +200,7 @@ recur_miso <- function(
       newxreg <- NULL
     }
 
-    fit <- tsglm(train_df$n, model = model, link = "log", distr = distr, xreg = xreg)
+    fit <- tsglm(train_df$n, model = model, link = link, distr = distr, xreg = xreg)
     pred <- predict(fit, horizon, newobs = NULL, newxreg = newxreg)
 
     tibble(
@@ -215,134 +236,128 @@ forecast_layer <- function(frcst_df) {
 }
 ```
 
+```{r}
+unregister_dopar <- function() {
+  env <- foreach:::.foreachGlobals
+  rm(list = ls(name = env), pos = env)
+}
+```
+
 
 ## Poisson
-
 ```{r}
-poi_covar_preds <- recur_miso(
+poi_covar_forecast_df <- recur_miso(
   train_weekly_weather_df, test_weekly_weather_df,
   seq(1, 49, 3),
-  distr = "poisson"
-)
-
-poi_covar_forecast_df <- poi_covar_preds %>%
+  model = list(past_obs = 1),
+  link = "log", distr = "poisson"
+) %>%
   mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
 
-ggplot(test_weekly_df) +
-  geom_line(aes(x = date_admitted, y = n)) +
-  forecast_layer(poi_covar_forecast_df) +
-  scale_x_yearweek(
-    breaks = as.Date(test_weekly_df$date_admitted[seq(1, 52, 3)]),
-    date_labels = "W%W",
-    minor_breaks = NULL
-  )
+forecast_plot_default(
+  poi_covar_forecast_df, test_weekly_df,
+  "4 week forecast - Poisson regression 1-week lag"
+)
+
+ggsave("./svgs/forecast_poisson_l1w.svg", height = 7, width = 10)
 ```
 
 
 ```{r}
-fit_perf(poisson_fit, train_weekly_weather_df$n)
-
-forecast <- tsibble(
-  date_admitted = test_weekly_weather_df$date_admitted, index = date_admitted
-) %>% bind_cols(
-  as_tibble(investr::predFit(
-    poisson_fit,
-    newdata = test_weekly_weather_df,
-    interval = "confidence",
-  ) %>% exp())
-)
-
-# sqrt(mean((
-#   predict(poisson_fit, newdata = test_weekly_weather_df) %>% exp() %>% as.vector() -
-#   test_weekly_weather_df$n
-# )^2))
-
-ggplot(
-  incidence_weekly_df %>%
-    left_join(forecast, by = "date_admitted"),
-  aes(x = date_admitted)
-) +
-  geom_line(aes(y = n)) +
-  geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "pink") +
-  geom_line(aes(y = fit), color = "red") +
-  scale_x_yearweek("Week", limits = c(as.Date("2018-01-01"), as.Date("2019-01-21"))) +
-  scale_y_continuous("Incidence") +
-  ggtitle("4 week forecast - Poisson")
-
-ggsave("forecast_poisson_4w.svg", width = 10, height = 7)
+poi_1wl_pre_perf <- poi_covar_forecast_df %>%
+  select(date, preds) %>%
+  left_join(test_weekly_df, by = c("date" = "date_admitted"))
 
 forecast_perf(
-  poisson_fit, test_weekly_weather_df$n,
-  newdata = test_weekly_weather_df, "Poisson"
-)
-```
-
-### Lagged
-
-```{r}
-poisson_lagged_fit <- glm(
-  n ~ date_admitted + t2m_lagged + precip_lagged,
-  family = poisson(), data = train_weekly_weather_df
-)
-
-fit_perf(poisson_lagged_fit, train_weekly_weather_df$n)
-
-forecast <- tsibble(
-  date_admitted = test_weekly_weather_df$date_admitted, index = date_admitted
-) %>% bind_cols(
-  as_tibble(investr::predFit(
-    poisson_lagged_fit,
-    newdata = test_weekly_weather_df,
-    interval = "confidence",
-  ) %>% exp())
-)
-
-
-ggplot(
-  incidence_weekly_df %>%
-    left_join(forecast, by = "date_admitted"),
-  aes(x = date_admitted)
-) +
-  geom_line(aes(y = n)) +
-  geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "pink") +
-  geom_line(aes(y = fit), color = "red") +
-  scale_x_yearweek("Week", limits = c(as.Date("2018-01-01"), as.Date("2019-01-21"))) +
-  scale_y_continuous("Incidence") +
-  ggtitle("4 week forecast - Poisson lagged covariables")
-
-ggsave("forecast_poisson_lagged_4w.svg", width = 10, height = 7)
-
-forecast_perf(
-  poisson_lagged_fit, test_weekly_weather_df$n,
-  newdata = test_weekly_weather_df, "Poisson lagged"
+  poi_1wl_pre_perf$preds,
+  poi_1wl_pre_perf$n, "Poisson 1-week lag"
 )
 ```
 
 
-### Multi lagged T2m
+### Auto lagged
 
 ```{r}
-for (i in 1:52) {
+lag_dfs <- lapply(1:52, \(lag){
+  cl <- makeCluster(4)
+
+  forecast_df <- recur_miso(
+    train_weekly_weather_df, test_weekly_weather_df,
+    seq(1, 49, 3),
+    model = list(past_obs = lag),
+    link = "log", distr = "poisson", cl = cl
+  ) %>%
+    mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
+
+  stopCluster(cl)
+
+  pre_perf <- forecast_df %>%
+    select(date, preds) %>%
+    left_join(test_weekly_df, by = c("date" = "date_admitted"))
+
+  rmse <- sqrt(mean((pre_perf$n - pre_perf$preds)^2))
+  mae <- mean(abs(pre_perf$n - pre_perf$preds))
+
+  tibble(model = sprintf("Poisson %d-week lag", lag), RMSE = rmse, MAE = mae, lag = lag)
+})
+```
+
+
+
+```{r}
+lag_dfs %>%
+  list_c() %>%
+  ggplot() +
+  geom_col(aes(x = lag, y = RMSE))
+
+ggsave("./svgs/forecast_poisson_all_lags.svg", width = 10, height = 7)
+```
+
+
+### Weather lagged
+ 
+#### T2m 
+
+```{r}
+cl <- makeCluster(6)
+clusterEvalQ(cl, suppressPackageStartupMessages(library(dplyr)))
+clusterEvalQ(cl, suppressPackageStartupMessages(library(purrr)))
+clusterEvalQ(cl, library(tscount))
+clusterEvalQ(cl, library(tsibble))
+clusterExport(cl, c(
+  "incidence_weekly_weather_df", "recur_miso"
+))
+
+
+lag_dfs <- parLapply(1:52, \(lag){
   train_df <- incidence_weekly_weather_df %>%
-    mutate(t2m_lagged = lag(t2m, i)) %>%
+    mutate(t2m = lag(t2m, lag)) %>%
     filter_index("2000 W01" ~ "2018 W52")
 
   test_df <- incidence_weekly_weather_df %>%
-    mutate(t2m_lagged = lag(t2m, i)) %>%
-    filter(year(date_admitted) == 2019) %>%
-    head(4)
+    mutate(t2m = lag(t2m, lag)) %>%
+    filter_index("2019 W01" ~ "2019 W52")
 
-  lagged_fit <- glm(
-    n ~ date_admitted + t2m_lagged,
-    family = poisson(), data = train_df
-  )
 
-  forecast_perf(
-    lagged_fit, test_df$n,
-    newdata = test_df, sprintf("Poisson T2m lagged %d", i),
-    plot = FALSE
-  )
-}
+  forecast_df <- recur_miso(
+    train_df, test_df,
+    seq(1, 49, 3),
+    model = list(past_obs = 1), xreg_names = c("t2m"),
+    link = "log", distr = "poisson"
+  ) %>%
+    mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
+
+  pre_perf <- forecast_df %>%
+    select(date, preds) %>%
+    left_join(test_weekly_df, by = c("date" = "date_admitted"))
+
+  rmse <- sqrt(mean((pre_perf$n - pre_perf$preds)^2))
+  mae <- mean(abs(pre_perf$n - pre_perf$preds))
+
+  tibble(model = sprintf("Poisson %d-week t2m lag", lag), RMSE = rmse, MAE = mae, lag = lag)
+}, cl = cl)
+
+stopCluster(cl)
 ```
 
 ```{r}
