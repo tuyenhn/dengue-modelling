@@ -5,15 +5,15 @@
 # library(stars)
 
 ## incidence data
-incidence_raw <- read_csv("incidence_ts_in.csv", show_col_types = FALSE) %>%
-  mutate(date_admitted = as.Date(date_admitted)) %>%
-  as_tsibble(index = date_admitted) %>%
-  fill_gaps(n = 0)
-
-incidence_weekly_df <- incidence_raw %>%
-  index_by(agg = ~ yearweek(.)) %>%
-  summarise(n = sum(n)) %>%
-  rename(date_admitted = agg)
+# incidence_raw <- read_csv("incidence_ts_in.csv", show_col_types = FALSE) %>%
+#   mutate(date_admitted = as.Date(date_admitted)) %>%
+#   as_tsibble(index = date_admitted) %>%
+#   fill_gaps(n = 0)
+#
+# incidence_weekly_df <- incidence_raw %>%
+#   index_by(agg = ~ yearweek(.)) %>%
+#   summarise(n = sum(n)) %>%
+#   rename(date_admitted = agg)
 
 ## sets
 # train_weekly_df <- incidence_weekly_df %>%
@@ -90,7 +90,7 @@ hcmc_rh_df <- read_rds("./data_weekly_rds-s/hcmc_rh_df.rds")
 # incidence_weekly_weather_df <- incidence_weekly_df %>%
 #   append_row(n = -51, keep_all = TRUE) %>%
 #   left_join(hcmc_weather_df, by = c("date_admitted" = "date"))
-
+#
 # train_weekly_weather_df <- incidence_weekly_weather_df %>%
 #   filter_index("2000 W01" ~ "2017 W52")
 #
@@ -100,6 +100,7 @@ hcmc_rh_df <- read_rds("./data_weekly_rds-s/hcmc_rh_df.rds")
 # test_weekly_weather_df <- incidence_weekly_weather_df %>%
 #   filter_index("2019 W01" ~ "2019 W52")
 
+incidence_weekly_weather_df <- read_rds("./data_weekly_rds-s/incidence_weekly_weather_df.rds")
 train_weekly_weather_df <- read_rds("./data_weekly_rds-s/train_weekly_weather_df.rds")
 val_weekly_weather_df <- read_rds("./data_weekly_rds-s/val_weekly_weather_df.rds")
 test_weekly_weather_df <- read_rds("./data_weekly_rds-s/test_weekly_weather_df.rds")
