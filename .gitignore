@@ -49,3 +49,4 @@ po/*~
 rsconnect/
 
 *.csv
+data_weekly_rds-s/*
