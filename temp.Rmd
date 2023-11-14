@@ -1,0 +1,61 @@
+```{r}
+incidence_full_renamed <- incidence_full %>%
+  mutate(
+    hospital = case_match(
+      hospital,
+      "BV QUAN 4" ~ "Bệnh viện Quận 4",
+      "BV BENH NHIET DOI" ~ "Bênh viện Bệnh nhiệt đới TPHCM",
+      "BV QUAN 11" ~ "Bệnh viện Quận 11",
+      "NHI DONG 2" ~ "Bệnh viện Nhi đồng 2",
+      "BV QUAN THU DUC" ~ "Bệnh viện Quận Thủ Đức",
+      "BV BINH TAN" ~ "Bệnh viện Quận Bình Tân",
+      "TRUNG VUONG" ~ "Bệnh viện Trưng Vương",
+      "NHI DONG 1" ~ "Bệnh viện Nhi đồng 2",
+      "BV BINH THANH" ~ "Bệnh viện Quận Bình Thạnh",
+      "BV TAN BINH" ~ "Bệnh viện Quận Tân Bình",
+      "THONG NHAT" ~ "Bệnh viện Thống Nhất",
+      "NGUYEN TRAI" ~ "Bệnh viện Nguyễn Trãi",
+      "BV QUAN 1" ~ "Bệnh viện Quận 1",
+      "BV QUAN 8" ~ "Bệnh viện Quận 8",
+      "BVDK CU CHI" ~ "Bệnh viện ĐKKV Củ Chi",
+      "BV PHU NHUAN" ~ "Bệnh viện Quận Phú Nhuận",
+      "BV TAN PHU" ~ "Bệnh viện Quận Tân Phú",
+      "BV QUAN 6" ~ "Bệnh viện Quận 6",
+      "BV HOC MON" ~ "Bệnh viện ĐKKV Hóc Môn",
+      "BV BINH CHANH" ~ "Bệnh viện Huyện Bình Chánh",
+      "BVDK THU DUC" ~ "Bệnh viện ĐKKV Thủ Đức",
+      "BV QUAN 7" ~ "Bệnh viện Quận 7",
+      "DK SAI GON" ~ "Bệnh viện đa khoa Sài Gòn",
+      "BV QUAN 12" ~ "Bệnh viện Quận 12",
+      "NHAN DAN GIA DINH" ~ "Bệnh viện Nhân Dân Gia Định",
+      "BV NHA BE" ~ "Bệnh viện Huyện Nhà Bè",
+      "BV DHYD" ~ "Bệnh viện Đại học Y Dược TPHCM",
+      "BV QUAN 5" ~ "Bệnh viện Quận 5",
+      "DK 30/4" ~ "Bệnh viện đa khoa 30/4 Tp.HCM",
+      "NGUYEN TRI PHUONG" ~ "Bệnh viện Nguyễn Tri Phương",
+      "CHO RAY" ~ "Bệnh viện Chợ Rẫy",
+      "BENH VIEN 115" ~ "Bệnh viện Nhân Dân 115",
+      "AN BINH" ~ "Bệnh viện An Bình",
+      "BV QUAN 3" ~ "Bệnh viện Quận 3",
+      .default = hospital
+    ),
+    date_admitted = yearweek(date_admitted)
+  ) %>%
+  filter(status == "in-patient") %>%
+  group_by(date_admitted, hospital) %>%
+  summarise(n = n()) %>%
+  mutate(n = n())
+
+incidence_full_renamed
+```
+
+
+```{r fig.height=20, fig.width=20}
+incidence_full_renamed %>%
+  ggplot() +
+  geom_line(aes(x = date_admitted, y = n, color = hospital, group = hospital)) +
+  theme(legend.position = "none") +
+  facet_wrap(~hospital)
+
+# plotly::ggplotly(p)
+```
