@@ -1,6 +1,6 @@
-# library(tidyverse)
-# library(tsibble)
-#
+library(tidyverse)
+library(tsibble)
+
 # library(sf)
 # library(stars)
 
@@ -35,7 +35,7 @@ test_weekly_df <- read_rds("./data_weekly_rds-s/test_weekly_df.rds")
 #   terra::unwrap() %>%
 #   st_as_sf() %>%
 #   filter(GID_1 == "VNM.25_1")
-
+#
 # hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
 
 ## weather variables from ERA5
@@ -54,7 +54,7 @@ test_weekly_df <- read_rds("./data_weekly_rds-s/test_weekly_df.rds")
 #     t2m = t2m - 273.15,
 #   ) %>%
 #   as_tsibble()
-
+#
 # hcmc_precip_df <- raw_weather %>%
 #   select(tp) %>%
 #   aggregate("1 week", FUN = sum) %>%
@@ -67,7 +67,7 @@ test_weekly_df <- read_rds("./data_weekly_rds-s/test_weekly_df.rds")
 #     precip = precip * 1000,
 #   ) %>%
 #   as_tsibble()
-
+#
 # hcmc_rh_df <- raw_weather %>%
 #   select(rh) %>%
 #   aggregate("1 week", FUN = mean) %>%
