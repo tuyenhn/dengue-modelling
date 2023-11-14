@@ -154,9 +154,17 @@ forecast_chunks <- function(
 ## Mean
 
 ```{r}
-mean_fit <- forecast_chunks(
-  train_weekly_df, test_weekly_df, seq(0, 49, 3), MEAN, n
+v_pois_test <- function(x) {
+  ci <- sapply(x, \(x) poisson.test(x)$conf.int)
+  list(lower = ci[1, ], upper = ci[2, ])
+}
+
+mean_fit <- forecast_chunks(train_weekly_df, test_weekly_df, seq(0, 49, 3), MEAN, n)
+mean_fit %<>% mutate(
+  uppers = v_pois_test(round(.mean))$upper,
+  lowers = v_pois_test(round(.mean))$lower
 )
+
 
 ggplot(test_weekly_df) +
   geom_line(aes(x = date_admitted, y = n)) +
@@ -194,6 +202,8 @@ smean_forecast <- train_weekly_df %>%
   ) %>%
   group_by(week) %>%
   summarise(
+    lowers = min(n),
+    uppers = max(n),
     smean = mean(n),
     smean_w = weighted.mean(n, year_w),
     smean_w_exp = weighted.mean(n, year_w_exp)
@@ -207,10 +217,11 @@ smean_forecast <- train_weekly_df %>%
   as_tsibble(index = "date_admitted")
 
 smean_forecast %>%
-  pivot_longer(-date_admitted) %>%
+  pivot_longer(-c(date_admitted, lowers, uppers)) %>%
   ggplot(aes(x = date_admitted)) +
-  geom_line(aes(y = value, color = name, group = name)) +
+  geom_ribbon(aes(ymin = lowers, ymax = uppers), alpha = 0.5, fill = "pink") +
   geom_line(data = incidence_weekly_df, mapping = aes(y = n)) +
+  geom_line(aes(y = value, color = name, group = name)) +
   scale_x_yearweek(
     "Week",
     limits = c(

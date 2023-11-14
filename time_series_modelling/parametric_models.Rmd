@@ -324,7 +324,12 @@ report(ar_fit)
 
 cat("\n\n")
 
-coefs <- ar_fit %>% coef() %>% slice(-1) %>% select(c(term, estimate)) %>% deframe() %>% as.list()
+coefs <- ar_fit %>%
+  coef() %>%
+  slice(-1) %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 coefs
 ```
 
@@ -361,19 +366,24 @@ forecast_perf(
 
 ```{r}
 lapply(0:7, \(q){
-  fit <- train_weekly_df %>%  model(ARIMA(n ~ pdq(0, 0, q) + PDQ(0, 0, 0)))
+  fit <- train_weekly_df %>% model(ARIMA(n ~ pdq(0, 0, q) + PDQ(0, 0, 0)))
   tibble(q = q, aicc = (glance(fit))$AICc)
 }) %>% list_c()
 ```
 
 
 ```{r}
-ma_fit <- train_weekly_df %>%  model(ARIMA(n ~ pdq(0, 0, 6) + PDQ(0, 0, 0)))
+ma_fit <- train_weekly_df %>% model(ARIMA(n ~ pdq(0, 0, 6) + PDQ(0, 0, 0)))
 report(ma_fit)
 
 cat("\n\n")
 
-coefs <- ma_fit %>% coef() %>% slice(1:6) %>% select(c(term, estimate)) %>% deframe() %>% as.list()
+coefs <- ma_fit %>%
+  coef() %>%
+  slice(1:6) %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 coefs
 ```
 
@@ -413,7 +423,11 @@ forecast_perf(
 arima_fit <- train_weekly_df %>% model(ARIMA(n ~ PDQ(0, 0, 0), stepwise = FALSE))
 report(arima_fit)
 
-coefs <- arima_fit %>% coef() %>% select(c(term, estimate)) %>% deframe() %>% as.list()
+coefs <- arima_fit %>%
+  coef() %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 coefs
 ```
 
@@ -421,7 +435,7 @@ coefs
 ```{r}
 arima_chunks_fit <- forecast_chunks(
   train_weekly_df, test_weekly_df, seq(0, 49, 3),
-  ARIMA, n ~ pdq(3,1,3, fixed = coefs) + PDQ(0, 0, 0)
+  ARIMA, n ~ pdq(3, 1, 3, fixed = coefs) + PDQ(0, 0, 0)
 )
 
 forecast_plot_default(
@@ -456,7 +470,7 @@ clusterExport(cl, c("train_weekly_weather_df"))
 
 arimax_models <- parLapply(
   cl = cl,
-  c(n ~ xreg(t2m) + PDQ(0, 0, 0), n ~ xreg(precip) + PDQ(0, 0, 0), n ~ xreg(rh) + PDQ(0, 0, 0)), 
+  c(n ~ xreg(t2m) + PDQ(0, 0, 0), n ~ xreg(precip) + PDQ(0, 0, 0), n ~ xreg(rh) + PDQ(0, 0, 0)),
   \(formula) train_weekly_weather_df %>% model(ARIMA(formula, stepwise = FALSE))
 )
 
@@ -465,17 +479,29 @@ stopCluster(cl)
 
 arimax_t2m_fit <- arimax_models[[1]]
 report(arimax_t2m_fit)
-t2m_coefs <- arimax_t2m_fit %>% coef() %>% select(c(term, estimate)) %>% deframe() %>% as.list()
+t2m_coefs <- arimax_t2m_fit %>%
+  coef() %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 t2m_coefs
 
 arimax_precip_fit <- arimax_models[[2]]
 report(arimax_precip_fit)
-precip_coefs <- arimax_precip_fit %>% coef() %>% select(c(term, estimate)) %>% deframe() %>% as.list()
+precip_coefs <- arimax_precip_fit %>%
+  coef() %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 precip_coefs
 
 arimax_rh_fit <- arimax_models[[3]]
 report(arimax_rh_fit)
-rh_coefs <- arimax_rh_fit %>% coef() %>% select(c(term, estimate)) %>% deframe() %>% as.list()
+rh_coefs <- arimax_rh_fit %>%
+  coef() %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 rh_coefs
 ```
 
@@ -557,15 +583,19 @@ forecast_perf(
 ### Combining covars
 
 ```{r}
-get_coefs <- \(fit) fit %>% coef() %>%select(c(term, estimate)) %>% deframe() %>% as.list()
+get_coefs <- \(fit) fit %>%
+  coef() %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 
-arimax_t2m_precip_fit <- train_weekly_weather_df %>% 
+arimax_t2m_precip_fit <- train_weekly_weather_df %>%
   model(ARIMA(n ~ xreg(t2m, precip) + PDQ(0, 0, 0), stepwise = FALSE))
-arimax_t2m_rh_fit <- train_weekly_weather_df %>% 
+arimax_t2m_rh_fit <- train_weekly_weather_df %>%
   model(ARIMA(n ~ xreg(t2m, rh) + PDQ(0, 0, 0), stepwise = FALSE))
-arimax_precip_rh_fit <- train_weekly_weather_df %>% 
+arimax_precip_rh_fit <- train_weekly_weather_df %>%
   model(ARIMA(n ~ xreg(precip, rh) + PDQ(0, 0, 0), stepwise = FALSE))
-arimax_weather_fit <- train_weekly_weather_df %>% 
+arimax_weather_fit <- train_weekly_weather_df %>%
   model(ARIMA(n ~ xreg(t2m, precip, rh) + PDQ(0, 0, 0), stepwise = FALSE))
 
 t2m_precip_coefs <- get_coefs(arimax_t2m_precip_fit)
@@ -582,26 +612,26 @@ weather_coefs
 ```{r}
 arimax_t2m_precip_fit <- forecast_chunks(
   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, 
-  n ~ xreg(t2m, precip, fixed = t2m_precip_coefs[c(7,8)]) + pdq(3,1,3,fixed = t2m_precip_coefs[-c(7,8)]) + PDQ(0, 0, 0)
+  ARIMA,
+  n ~ xreg(t2m, precip, fixed = t2m_precip_coefs[c(7, 8)]) + pdq(3, 1, 3, fixed = t2m_precip_coefs[-c(7, 8)]) + PDQ(0, 0, 0)
 )
 arimax_t2m_precip_fit
 
 arimax_t2m_rh_fit <- forecast_chunks(
   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, n ~ xreg(t2m, rh, fixed = t2m_rh_coefs[c(7,8)]) + pdq(3,1,3,fixed = t2m_rh_coefs[-c(7,8)]) + PDQ(0, 0, 0)
+  ARIMA, n ~ xreg(t2m, rh, fixed = t2m_rh_coefs[c(7, 8)]) + pdq(3, 1, 3, fixed = t2m_rh_coefs[-c(7, 8)]) + PDQ(0, 0, 0)
 )
 arimax_t2m_rh_fit
 
 arimax_precip_rh_fit <- forecast_chunks(
   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, n ~ xreg(precip, rh, fixed = precip_rh_coefs[c(7,8)]) + pdq(3,1,3,fixed = precip_rh_coefs[-c(7,8)]) + PDQ(0, 0, 0)
+  ARIMA, n ~ xreg(precip, rh, fixed = precip_rh_coefs[c(7, 8)]) + pdq(3, 1, 3, fixed = precip_rh_coefs[-c(7, 8)]) + PDQ(0, 0, 0)
 )
 arimax_precip_rh_fit
 
 arimax_weather_fit <- forecast_chunks(
   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, n ~ xreg(t2m, precip, rh, fixed = weather_coefs[c(7,8,9)]) + pdq(3,1,3,fixed = weather_coefs[-c(7,8,9)]) + PDQ(0, 0, 0),
+  ARIMA, n ~ xreg(t2m, precip, rh, fixed = weather_coefs[c(7, 8, 9)]) + pdq(3, 1, 3, fixed = weather_coefs[-c(7, 8, 9)]) + PDQ(0, 0, 0),
   stepwise = FALSE
 )
 arimax_weather_fit
@@ -679,12 +709,17 @@ forecast_perf(
 ### Base model
 ```{r}
 # 10-11mins
-system.time(
-  {sarima_fit <- train_weekly_df %>% model(ARIMA(n))}
-)
+system.time({
+  sarima_fit <- train_weekly_df %>% model(ARIMA(n))
+})
 report(sarima_fit)
 
-sarima_coefs <- sarima_fit %>% coef() %>% head(-1) %>% select(c(term, estimate)) %>% deframe() %>% as.list()
+sarima_coefs <- sarima_fit %>%
+  coef() %>%
+  head(-1) %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 sarima_coefs
 ```
 
@@ -694,7 +729,7 @@ sarima_coefs
 ```{r}
 sarima_chunks_fit <- forecast_chunks(
   train_weekly_df, test_weekly_df, seq(0, 49, 3),
-  ARIMA, n ~ pdq(1,0,1, fixed = sarima_coefs[-3]) + PDQ(1, 1, 0, fixed = sarima_coefs[3])
+  ARIMA, n ~ pdq(1, 0, 1, fixed = sarima_coefs[-3]) + PDQ(1, 1, 0, fixed = sarima_coefs[3])
 )
 
 forecast_plot_default(
@@ -733,7 +768,7 @@ clusterExport(cl, c("train_weekly_weather_df"))
 
 sarimax_models <- parLapply(
   cl = cl,
-  c(n ~ xreg(t2m), n ~ xreg(precip), n ~ xreg(rh)), 
+  c(n ~ xreg(t2m), n ~ xreg(precip), n ~ xreg(rh)),
   \(formula) train_weekly_weather_df %>% model(ARIMA(formula, stepwise = FALSE))
 )
 
@@ -744,17 +779,31 @@ stopCluster(cl)
 ```{r}
 sarimax_t2m_fit <- sarimax_models[[1]]
 report(sarimax_t2m_fit)
-sarimax_t2m_coefs <- sarimax_t2m_fit %>% coef() %>% select(c(term, estimate)) %>% deframe() %>% as.list()
+sarimax_t2m_coefs <- sarimax_t2m_fit %>%
+  coef() %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 sarimax_t2m_coefs
 
 sarimax_precip_fit <- sarimax_models[[2]]
 report(sarimax_precip_fit)
-sarimax_precip_coefs <- sarimax_precip_fit %>% coef() %>% head(-1) %>% select(c(term, estimate)) %>% deframe() %>% as.list()
+sarimax_precip_coefs <- sarimax_precip_fit %>%
+  coef() %>%
+  head(-1) %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 sarimax_precip_coefs
 
 sarimax_rh_fit <- sarimax_models[[3]]
 report(sarimax_rh_fit)
-sarimax_rh_coefs <- sarimax_rh_fit %>% coef() %>% head(-1) %>% select(c(term, estimate)) %>% deframe() %>% as.list()
+sarimax_rh_coefs <- sarimax_rh_fit %>%
+  coef() %>%
+  head(-1) %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 sarimax_rh_coefs
 ```
 
@@ -762,17 +811,17 @@ sarimax_rh_coefs
 ```{r}
 sarimax_t2m_chunks_fit <- forecast_chunks(
   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, n ~ xreg(t2m, fixed = sarimax_t2m_coefs[7]) + pdq(0,1,5, fixed = sarimax_t2m_coefs[1:5]) + PDQ(1, 0, 0, fixed = sarimax_t2m_coefs[6])
+  ARIMA, n ~ xreg(t2m, fixed = sarimax_t2m_coefs[7]) + pdq(0, 1, 5, fixed = sarimax_t2m_coefs[1:5]) + PDQ(1, 0, 0, fixed = sarimax_t2m_coefs[6])
 )
 
 sarimax_precip_chunks_fit <- forecast_chunks(
   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, n ~ xreg(precip, fixed = sarimax_precip_coefs[4]) + pdq(1,0,1, fixed = sarimax_precip_coefs[1:2]) + PDQ(1, 1, 0, fixed = sarimax_precip_coefs[3])
+  ARIMA, n ~ xreg(precip, fixed = sarimax_precip_coefs[4]) + pdq(1, 0, 1, fixed = sarimax_precip_coefs[1:2]) + PDQ(1, 1, 0, fixed = sarimax_precip_coefs[3])
 )
 
 sarimax_rh_chunks_fit <- forecast_chunks(
   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, n ~ xreg(rh, fixed = sarimax_rh_coefs[4]) + pdq(1,0,1, fixed = sarimax_rh_coefs[1:2]) + PDQ(1, 1, 0, fixed = sarimax_rh_coefs[3])
+  ARIMA, n ~ xreg(rh, fixed = sarimax_rh_coefs[4]) + pdq(1, 0, 1, fixed = sarimax_rh_coefs[1:2]) + PDQ(1, 1, 0, fixed = sarimax_rh_coefs[3])
 )
 ```
 
@@ -830,7 +879,6 @@ forecast_perf(
   exp(rh_pre_perf$.mean),
   exp(rh_pre_perf$n), "SARIMA(1,0,1)(1,1,0) + rh"
 )
-
 ```
 
 

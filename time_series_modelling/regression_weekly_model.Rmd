@@ -324,17 +324,16 @@ ggsave("./svgs/forecast_poisson_all_lags.svg", width = 10, height = 7)
 #### T2m 
 
 ```{r}
-cl <- makeCluster(6)
-clusterEvalQ(cl, suppressPackageStartupMessages(library(dplyr)))
-clusterEvalQ(cl, suppressPackageStartupMessages(library(purrr)))
-clusterEvalQ(cl, library(tscount))
+unregister_dopar()
+
+cl <- makeCluster(10)
+clusterEvalQ(cl, library(dplyr))
 clusterEvalQ(cl, library(tsibble))
-clusterExport(cl, c(
-  "incidence_weekly_weather_df", "recur_miso"
-))
+clusterEvalQ(cl, library(purrr))
+clusterEvalQ(cl, library(tscount))
+registerDoParallel(cl)
 
-
-lag_dfs <- parLapply(1:52, \(lag){
+t2m_lag_df <- foreach(lag = 1:52) %dopar% {
   train_df <- incidence_weekly_weather_df %>%
     mutate(t2m = lag(t2m, lag)) %>%
     filter_index("2000 W01" ~ "2018 W52")
@@ -360,19 +359,21 @@ lag_dfs <- parLapply(1:52, \(lag){
   mae <- mean(abs(pre_perf$n - pre_perf$preds))
 
   tibble(model = sprintf("Poisson %d-week t2m lag", lag), RMSE = rmse, MAE = mae, lag = lag)
-}, cl = cl)
+}
 
 stopCluster(cl)
 ```
 
 ```{r}
-model_perfs %>%
-  filter(startsWith(model, "Poisson T2m lagged")) %>%
-  mutate(lag = str_extract(model, "\\d+$") %>% as.numeric()) %>%
-  ggplot(aes(x = lag, y = RMSE)) +
-  geom_col() +
-  scale_x_continuous(breaks = seq(1, 52, 2), minor_breaks = NULL)
+t2m_lag_df %>%
+  list_c() %>%
+  ggplot() +
+  geom_col(aes(x = lag, y = RMSE))
+
+ggsave("./svgs/forecast_poisson_all_t2m_lags.svg", width = 10, height = 7)
 ```
+
+
 
 ### Multi lagged Precip
 

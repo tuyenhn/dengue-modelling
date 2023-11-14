@@ -20,7 +20,7 @@ theme_set(theme_bw())
 # Data ingestion
 
 ```{r}
-suppressPackageStartupMessages(source("../data_weekly.R", chdir = TRUE))
+source("../data_weekly.R", chdir = TRUE)
 ```
 
 # Framework
