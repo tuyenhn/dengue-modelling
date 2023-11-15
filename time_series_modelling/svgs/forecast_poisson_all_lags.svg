@@ -105,6 +105,8 @@
 <rect x='649.62' y='131.67' width='10.63' height='319.41' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt; stroke-linejoin: miter; fill: #595959;' />
 <rect x='661.43' y='132.90' width='10.63' height='318.18' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt; stroke-linejoin: miter; fill: #595959;' />
 <rect x='673.24' y='132.35' width='10.63' height='318.73' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt; stroke-linejoin: miter; fill: #595959;' />
+<line x1='74.25' y1='344.95' x2='78.16' y2='341.04' style='stroke-width: 0.71; stroke: #FF0000;' />
+<line x1='74.25' y1='341.04' x2='78.16' y2='344.95' style='stroke-width: 0.71; stroke: #FF0000;' />
 <rect x='40.24' y='5.48' width='674.28' height='466.82' style='stroke-width: 1.07; stroke: #333333;' />
 </g>
 <g clip-path='url(#cpMC4wMHw3MjAuMDB8MC4wMHw1MDQuMDA=)'>
