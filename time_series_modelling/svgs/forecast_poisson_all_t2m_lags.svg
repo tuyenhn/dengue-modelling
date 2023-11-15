@@ -103,6 +103,8 @@
 <rect x='649.62' y='144.81' width='10.63' height='306.26' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt; stroke-linejoin: miter; fill: #595959;' />
 <rect x='661.43' y='100.24' width='10.63' height='350.83' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt; stroke-linejoin: miter; fill: #595959;' />
 <rect x='673.24' y='149.28' width='10.63' height='301.80' style='stroke-width: 1.07; stroke: none; stroke-linecap: butt; stroke-linejoin: miter; fill: #595959;' />
+<line x1='227.79' y1='185.37' x2='231.70' y2='181.46' style='stroke-width: 0.71; stroke: #FF0000;' />
+<line x1='227.79' y1='181.46' x2='231.70' y2='185.37' style='stroke-width: 0.71; stroke: #FF0000;' />
 <rect x='40.24' y='5.48' width='674.28' height='466.82' style='stroke-width: 1.07; stroke: #333333;' />
 </g>
 <g clip-path='url(#cpMC4wMHw3MjAuMDB8MC4wMHw1MDQuMDA=)'>
