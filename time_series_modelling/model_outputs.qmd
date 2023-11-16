@@ -396,3 +396,24 @@ knitr::kable(par_perfs %>% filter(!startsWith(model, "Prophet")), format = "html
 ```{r}
 knitr::kable(par_perfs %>% filter(startsWith(model, "Prophet")), format = "html")
 ```
+
+## Poisson autoregression
+
+![4 week forecast - Poisson autoregression 1-week lag](svgs/forecast_poisson_l1w.svg){#fig-poi_auto_1wl fig-align="center"}
+
+## Poisson autoregression - different auto lags
+
+![4 week forecast - Poisson autoregression different auto lags](svgs/forecast_poisson_all_lags.svg){#fig-poi_auto_all fig-align="center"}
+
+## Poisson autoregression - temperature lags
+
+![4 week forecast - Poisson autoregression 1-week lag, different temperature lags](svgs/forecast_poisson_all_t2m_lags.svg){#fig-poi_t2m_lags fig-align="center"}
+
+## Poisson autoregression - precipitation lags
+
+![4 week forecast - Poisson autoregression 1-week lag, different precipitation lags](svgs/forecast_poisson_all_precip_lags.svg){#fig-poi_precip_lags fig-align="center"}
+
+
+## Poisson autoregression - relative humidity lags
+
+![4 week forecast - Poisson autoregression 1-week lag, different relative humidity lags](svgs/forecast_poisson_all_rh_lags.svg){#fig-poi_rh_lags fig-align="center"}

@@ -180,6 +180,24 @@ model_perfs <- tibble(
   MAE = numeric()
 )
 
+chunks_forecast_perf <- function(frcst_df, model_name) {
+  res_df <- frcst_df %>%
+    group_by(startweek) %>%
+    summarise(
+      RMSE = sqrt(mean((n - .mean)^2)),
+      MAE = mean(abs(n - .mean))
+    )
+
+  avg_rmse <- mean(res_df$RMSE)
+  avg_mae <- mean(res_df$MAE)
+
+  print(sprintf("Test mean RMSE: %f", avg_rmse))
+  print(sprintf("Test mean MAE: %f", avg_mae))
+
+  model_perfs <<- model_perfs %>%
+    bind_rows(tibble(model = model_name, RMSE = avg_rmse, MAE = avg_mae))
+}
+
 forecast_perf <- function(forecast, actual, model_name) {
   rmse <- sqrt(mean((actual - forecast)^2))
   mae <- mean(abs(actual - forecast))
@@ -816,7 +834,7 @@ sarimax_t2m_chunks_fit <- forecast_chunks(
 
 sarimax_precip_chunks_fit <- forecast_chunks(
   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, n ~ xreg(precip, fixed = sarimax_precip_coefs[4]) + pdq(1, 0, 1, fixed = sarimax_precip_coefs[1:2]) + PDQ(1, 1, 0, fixed = sarimax_precip_coefs[3])
+  ARIMA, n ~ xreg(precip, fixed = sarimax_precip_coefs[4]) + pdq(1, 0, 1, fixed = sarimax_precip_coefs[1:2]) + PDQ(2, 1, 0, fixed = sarimax_precip_coefs[3:4])
 )
 
 sarimax_rh_chunks_fit <- forecast_chunks(
@@ -868,7 +886,7 @@ precip_pre_perf <- sarimax_precip_chunks_fit %>%
 
 forecast_perf(
   exp(precip_pre_perf$.mean),
-  exp(precip_pre_perf$n), "SARIMA(1,0,1)(1,1,0) + precip"
+  exp(precip_pre_perf$n), "SARIMA(1,0,1)(2,1,0) + precip"
 )
 
 rh_pre_perf <- sarimax_rh_chunks_fit %>%
