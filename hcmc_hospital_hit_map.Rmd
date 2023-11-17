@@ -7,6 +7,7 @@ incidence_full_renamed <- incidence_full %>%
       "BV BENH NHIET DOI" ~ "Bênh viện Bệnh nhiệt đới TPHCM",
       "BV QUAN 11" ~ "Bệnh viện Quận 11",
       "NHI DONG 2" ~ "Bệnh viện Nhi đồng 2",
+      "bv.nd2.khth@gmail.com" ~ "Bệnh viện Nhi đồng 2",
       "BV QUAN THU DUC" ~ "Bệnh viện Quận Thủ Đức",
       "BV BINH TAN" ~ "Bệnh viện Quận Bình Tân",
       "TRUNG VUONG" ~ "Bệnh viện Trưng Vương",
@@ -37,8 +38,10 @@ incidence_full_renamed <- incidence_full %>%
       "BENH VIEN 115" ~ "Bệnh viện Nhân Dân 115",
       "AN BINH" ~ "Bệnh viện An Bình",
       "BV QUAN 3" ~ "Bệnh viện Quận 3",
+      "Bênh viện Pháp Việt" ~ "Bệnh viện Pháp Việt",
       .default = hospital
     ),
+    hospital = tolower(hospital),
     date_admitted = yearweek(date_admitted)
   ) %>%
   filter(status == "in-patient") %>%
@@ -60,29 +63,65 @@ incidence_full_renamed %>%
 # plotly::ggplotly(p)
 ```
 
-
 ```{r fig.height=10, fig.width=20}
 incidence_full_renamed %>%
   replace_na(list(n = 0)) %>%
-  mutate(date_admitted = as.Date(date_admitted), hospital = as.factor(hospital)) %>%
+  mutate(presence = ifelse(n > 0, 1, 0), date_admitted = as.Date(date_admitted)) %>%
   group_by(hospital) %>%
-  mutate(total = sum(n)) %>%
-  ungroup() %>%
-  mutate(hospital = fct_reorder(hospital, desc(total))) %>%
-  ggplot() +
-  geom_raster(aes(x = date_admitted, y = hospital, fill = n)) +
-  scale_fill_viridis_c() +
-  scale_x_date(date_breaks = "1 year", date_labels = "%Y")
+  summarise(total_presence = sum(presence)) %>%
+  mutate(hospital = fct_reorder(hospital, total_presence)) %>%
+  arrange(desc(total_presence))
 ```
 
 
 ```{r}
-incidence_full_renamed %>%
+incidence_full_presence_group <- incidence_full_renamed %>%
   replace_na(list(n = 0)) %>%
-  mutate(exist = ifelse(n > 0, 1, 0), date_admitted = as.Date(date_admitted)) %>%
-  group_by(date_admitted) %>%
-  summarise(hit = sum(exist) / n()) %>%
+  mutate(presence = ifelse(n > 0, 1, 0), date_admitted = as.Date(date_admitted)) %>%
+  group_by(hospital) %>%
+  mutate(
+    total_presence = sum(presence),
+    group = case_when(
+      total_presence > 500 ~ 1,
+      total_presence > 50 ~ 2,
+      total_presence > 0 ~ 3
+    )
+  ) %>%
+  group_by(group) %>%
+  mutate(hospital = fct_reorder(hospital, total_presence))
+```
+
+```{r fig.height=10, fig.width=15}
+incidence_full_presence_group %>%
+  count(hospital, presence) %>%
+  pivot_wider(id_cols = c(group, hospital), names_from = presence, values_from = n) %>%
+  ungroup() %>%
+  mutate(hospital = fct_reorder(hospital, `0`)) %>%
   ggplot() +
-  geom_line(aes(x = date_admitted, y = hit)) +
-  scale_x_date(date_breaks = "1 year", date_labels = "%Y")
+  geom_col(aes(y = hospital, x = `0`))
+```
+
+
+```{r fig.height=15, fig.width=20}
+incidence_full_presence_group %>%
+  mutate(
+    presence = as.factor(presence)
+  ) %>%
+  ggplot() +
+  geom_raster(aes(x = date_admitted, y = hospital, fill = presence)) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  facet_wrap(~group, ncol = 1, scales = "free")
+```
+
+
+```{r}
+incidence_full_presence_group %>%
+  group_by(hospital) %>%
+  select(hospital, presence, n) %>%
+  summarise(with_data = sum(presence), incidence_pw = sum(n)) %>%
+  ggplot(aes(y = with_data, x = log(incidence_pw))) +
+  geom_point() +
+  geom_smooth() +
+  scale_y_continuous("Incidence per week") +
+  scale_x_continuous("Number of weeks with presence of data")
 ```
