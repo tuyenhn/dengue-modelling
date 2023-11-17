@@ -180,15 +180,22 @@ model_perfs <- tibble(
   MAE = numeric()
 )
 
-forecast_perf <- function(forecast, actual, model_name) {
-  rmse <- sqrt(mean((actual - forecast)^2))
-  mae <- mean(abs(actual - forecast))
+chunks_forecast_perf <- function(frcst_df, model_name) {
+  res_df <- frcst_df %>%
+    group_by(startweek) %>%
+    summarise(
+      RMSE = sqrt(mean((n - .mean)^2)),
+      MAE = mean(abs(n - .mean))
+    )
 
-  print(sprintf("Test RMSE: %f", rmse))
-  print(sprintf("Test MAE: %f", mae))
+  avg_rmse <- mean(res_df$RMSE)
+  avg_mae <- mean(res_df$MAE)
+
+  print(sprintf("Test mean RMSE: %f", avg_rmse))
+  print(sprintf("Test mean MAE: %f", avg_mae))
 
   model_perfs <<- model_perfs %>%
-    bind_rows(tibble(model = model_name, RMSE = rmse, MAE = mae))
+    bind_rows(tibble(model = model_name, RMSE = avg_rmse, MAE = avg_mae))
 }
 ```
 
@@ -350,13 +357,12 @@ ggsave("./svgs/forecast_ar10.svg", width = 10, height = 7)
 ```
 
 ```{r}
-pre_perf <- ar_chunks_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+pre_perf_df <- ar_chunks_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(pre_perf$.mean),
-  exp(pre_perf$n), "AR(10)"
+chunks_forecast_perf(
+  pre_perf_df, "AR(10)"
 )
 ```
 
@@ -406,13 +412,12 @@ ggsave("./svgs/forecast_ma6.svg", width = 10, height = 7)
 
 
 ```{r}
-pre_perf <- ma_chunks_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+pre_perf_df <- ma_chunks_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(pre_perf$.mean),
-  exp(pre_perf$n), "MA(6)"
+chunks_forecast_perf(
+  pre_perf_df, "MA(6)"
 )
 ```
 
@@ -449,13 +454,12 @@ ggsave("./svgs/forecast_arima.svg", width = 10, height = 7)
 
 
 ```{r}
-pre_perf <- arima_chunks_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+pre_perf_df <- arima_chunks_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(pre_perf$.mean),
-  exp(pre_perf$n), "ARIMA(3,1,3)"
+chunks_forecast_perf(
+  pre_perf_df, "ARIMA(3,1,3)"
 )
 ```
 
@@ -552,31 +556,28 @@ ggsave("./svgs/forecast_arimax_rh.svg", width = 10, height = 7)
 
 
 ```{r}
-t2m_pre_perf <- arimax_t2m_chunks_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+t2m_pre_perf_df <- arimax_t2m_chunks_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(t2m_pre_perf$.mean),
-  exp(pre_perf$n), "ARIMA(3,1,3) + t2m"
+chunks_forecast_perf(
+  t2m_pre_perf_df, "ARIMA(3,1,3) + t2m"
 )
 
-precip_pre_perf <- arimax_precip_chunks_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+precip_pre_perf_df <- arimax_precip_chunks_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(precip_pre_perf$.mean),
-  exp(pre_perf$n), "ARIMA(3,1,3) + precip"
+chunks_forecast_perf(
+  precip_pre_perf_df, "ARIMA(3,1,3) + precip"
 )
 
-rh_pre_perf <- arimax_rh_chunks_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+rh_pre_perf_df <- arimax_rh_chunks_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(rh_pre_perf$.mean),
-  exp(pre_perf$n), "ARIMA(3,1,3) + rh"
+chunks_forecast_perf(
+  rh_pre_perf_df, "ARIMA(2,1,4) + rh"
 )
 ```
 
@@ -668,40 +669,36 @@ ggsave("./svgs/forecast_arimax_weather.svg", width = 10, height = 7)
 ```
 
 ```{r}
-t2m_precip_pre_perf <- arimax_t2m_precip_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+t2m_precip_pre_perf_df <- arimax_t2m_precip_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(t2m_precip_pre_perf$.mean),
-  exp(pre_perf$n), "ARIMA(3,1,3) + t2m + tp"
+chunks_forecast_perf(
+  t2m_precip_pre_perf_df, "ARIMA(3,1,3) + t2m + tp"
 )
 
-t2m_rh_pre_perf <- arimax_t2m_rh_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+t2m_rh_pre_perf_df <- arimax_t2m_rh_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(t2m_rh_pre_perf$.mean),
-  exp(pre_perf$n), "ARIMA(3,1,3) + t2m + rh"
+chunks_forecast_perf(
+  t2m_rh_pre_perf_df, "ARIMA(3,1,3) + t2m + rh"
 )
 
-precip_rh_pre_perf <- arimax_precip_rh_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+precip_rh_pre_perf_df <- arimax_precip_rh_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(precip_rh_pre_perf$.mean),
-  exp(pre_perf$n), "ARIMA(3,1,3) + tp + rh"
+chunks_forecast_perf(
+  precip_rh_pre_perf_df, "ARIMA(2,1,4) + tp + rh"
 )
 
-weather_pre_perf <- arimax_weather_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+weather_pre_perf_df <- arimax_weather_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(weather_pre_perf$.mean),
-  exp(pre_perf$n), "ARIMA(3,1,3) + t2m + tp + rh"
+chunks_forecast_perf(
+  weather_pre_perf_df, "ARIMA(3,1,3) + t2m + tp + rh"
 )
 ```
 
@@ -743,13 +740,12 @@ ggsave("./svgs/forecast_sarima.svg", width = 10, height = 7)
 
 
 ```{r}
-pre_perf <- sarima_chunks_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+pre_perf_df <- sarima_chunks_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(pre_perf$.mean),
-  exp(pre_perf$n), "SARIMA(1,0,1)(1,1,0)"
+chunks_forecast_perf(
+ pre_perf_df, "SARIMA(1,0,1)(1,1,0)"
 )
 ```
 
@@ -816,7 +812,7 @@ sarimax_t2m_chunks_fit <- forecast_chunks(
 
 sarimax_precip_chunks_fit <- forecast_chunks(
   train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, n ~ xreg(precip, fixed = sarimax_precip_coefs[4]) + pdq(1, 0, 1, fixed = sarimax_precip_coefs[1:2]) + PDQ(1, 1, 0, fixed = sarimax_precip_coefs[3])
+  ARIMA, n ~ xreg(precip, fixed = sarimax_precip_coefs[4]) + pdq(1, 0, 1, fixed = sarimax_precip_coefs[1:2]) + PDQ(2, 1, 0, fixed = sarimax_precip_coefs[3:4])
 )
 
 sarimax_rh_chunks_fit <- forecast_chunks(
@@ -853,31 +849,28 @@ ggsave("./svgs/forecast_sarimax_rh.svg", width = 10, height = 7)
 ```
 
 ```{r}
-t2m_pre_perf <- sarimax_t2m_chunks_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+t2m_pre_perf_df <- sarimax_t2m_chunks_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(t2m_pre_perf$.mean),
-  exp(t2m_pre_perf$n), "SARIMA(1,1,0)(1,0,2) + t2m"
+chunks_forecast_perf(
+  t2m_pre_perf_df, "SARIMA(1,1,0)(1,0,2) + t2m"
 )
 
-precip_pre_perf <- sarimax_precip_chunks_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+precip_pre_perf_df <- sarimax_precip_chunks_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(precip_pre_perf$.mean),
-  exp(precip_pre_perf$n), "SARIMA(1,0,1)(1,1,0) + precip"
+chunks_forecast_perf(
+  precip_pre_perf_df, "SARIMA(1,0,1)(1,1,0) + precip"
 )
 
-rh_pre_perf <- sarimax_rh_chunks_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+rh_pre_perf_df<- sarimax_rh_chunks_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(rh_pre_perf$.mean),
-  exp(rh_pre_perf$n), "SARIMA(1,0,1)(1,1,0) + rh"
+chunks_forecast_perf(
+  rh_pre_perf_df, "SARIMA(1,0,1)(1,1,0) + rh"
 )
 ```
 
@@ -915,22 +908,20 @@ ggsave("./svgs/forecast_prophet_multi.svg", width = 10, height = 7)
 ```
 
 ```{r}
-addi_pre_perf <- prophet_addi_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+addi_pre_perf_df <- prophet_addi_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(addi_pre_perf$.mean),
-  exp(pre_perf$n), "Prophet additive"
+chunks_forecast_perf(
+  addi_pre_perf_df, "Prophet additive"
 )
 
-multi_pre_perf <- prophet_multi_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+multi_pre_perf_df <- prophet_multi_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(multi_pre_perf$.mean),
-  exp(pre_perf$n), "Prophet multiplicative"
+chunks_forecast_perf(
+  multi_pre_perf_df, "Prophet multiplicative"
 )
 ```
 
@@ -979,31 +970,28 @@ ggsave("./svgs/forecast_prophet_rh.svg", width = 10, height = 7)
 ```
 
 ```{r}
-prophet_t2m_pre_perf <- prophet_t2m_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+prophet_t2m_pre_perf_df <- prophet_t2m_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(prophet_t2m_pre_perf$.mean),
-  exp(pre_perf$n), "Prophet additive + mean 2m temperature"
+chunks_forecast_perf(
+  prophet_t2m_pre_perf_df, "Prophet additive + mean 2m temperature"
 )
 
-prophet_precip_pre_perf <- prophet_precip_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+prophet_precip_pre_perf_df <- prophet_precip_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(prophet_precip_pre_perf$.mean),
-  exp(pre_perf$n), "Prophet additive + total precipitation"
+chunks_forecast_perf(
+  prophet_precip_pre_perf_df, "Prophet additive + total precipitation"
 )
 
-prophet_rh_pre_perf <- prophet_rh_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+prophet_rh_pre_perf_df <- prophet_rh_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(prophet_rh_pre_perf$.mean),
-  exp(pre_perf$n), "Prophet additive + mean relative humidity"
+chunks_forecast_perf(
+  prophet_rh_pre_perf_df, "Prophet additive + mean relative humidity"
 )
 ```
 
@@ -1065,13 +1053,12 @@ ggsave("./svgs/forecast_prophet_holiday.svg", width = 10, height = 7)
 
 
 ```{r}
-prophet_holiday_pre_perf <- prophet_holiday_fit %>%
-  select(date_admitted, .mean) %>%
-  left_join(test_weekly_df, by = "date_admitted")
+prophet_holiday_pre_perf_df <- prophet_holiday_fit %>%
+  select(date_admitted, .mean, startweek) %>%
+  left_join(test_weekly_df, by = "date_admitted") %>% mutate(.mean = exp(.mean), n = exp(n))
 
-forecast_perf(
-  exp(prophet_holiday_pre_perf$.mean),
-  exp(pre_perf$n), "Prophet additive + holiday"
+chunks_forecast_perf(
+  prophet_holiday_pre_perf_df, "Prophet additive + holiday"
 )
 ```
 

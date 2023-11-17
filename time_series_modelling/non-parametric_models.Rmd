@@ -66,6 +66,24 @@ model_perfs <- tibble(
   MAE = numeric()
 )
 
+chunks_forecast_perf <- function(frcst_df, model_name) {
+  res_df <- frcst_df %>%
+    group_by(startweek) %>%
+    summarise(
+      RMSE = sqrt(mean((n - .mean)^2)),
+      MAE = mean(abs(n - .mean))
+    )
+
+  avg_rmse <- mean(res_df$RMSE)
+  avg_mae <- mean(res_df$MAE)
+
+  print(sprintf("Test mean RMSE: %f", avg_rmse))
+  print(sprintf("Test mean MAE: %f", avg_mae))
+
+  model_perfs <<- model_perfs %>%
+    bind_rows(tibble(model = model_name, RMSE = avg_rmse, MAE = avg_mae))
+}
+
 forecast_perf <- function(forecast, actual, model_name) {
   rmse <- sqrt(mean((actual - forecast)^2))
   mae <- mean(abs(actual - forecast))
@@ -182,11 +200,11 @@ ggsave("./svgs/forecast_mean_4w.svg", width = 10, height = 7)
 ```
 
 ```{r}
-pre_perf <- mean_fit %>%
-  select(date_admitted, .mean) %>%
+pre_perf_df <- mean_fit %>%
+  select(date_admitted, .mean, startweek) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-forecast_perf(pre_perf$.mean, pre_perf$n, "MEAN")
+chunks_forecast_perf(pre_perf_df, "MEAN")
 ```
 
 
@@ -236,7 +254,10 @@ smean_forecast %>%
   ggtitle("4 week forecast - Seasonal mean")
 
 ggsave("./svgs/forecast_smean_4w.svg", width = 10, height = 7)
+```
 
+
+```{r}
 forecast_perf(
   smean_forecast %>% head(4) %>% as_tibble() %>% pull(smean),
   test_weekly_weather_df %>% pull(n),
@@ -277,11 +298,11 @@ ggsave("./svgs/forecast_naive_4w.svg", width = 10, height = 7)
 
 
 ```{r}
-pre_perf <- naive_fit %>%
-  select(date_admitted, .mean) %>%
+pre_perf_df <- naive_fit %>%
+  select(date_admitted, .mean, startweek) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-forecast_perf(pre_perf$.mean, pre_perf$n, "NAIVE")
+chunks_forecast_perf(pre_perf_df, "NAIVE")
 ```
 
 ## SNAIVE
@@ -347,11 +368,11 @@ ggsave("./svgs/forecast_drift_4w.svg", width = 10, height = 7)
 
 
 ```{r}
-pre_perf <- drift_fit %>%
-  select(date_admitted, .mean) %>%
+pre_perf_df <- drift_fit %>%
+  select(date_admitted, .mean, startweek) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-forecast_perf(pre_perf$.mean, pre_perf$n, "Drift")
+chunks_forecast_perf(pre_perf_df, "Drift")
 ```
 
 # Comparison

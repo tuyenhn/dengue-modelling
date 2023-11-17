@@ -37,7 +37,7 @@ theme_set(theme_bw())
 # Data ingestion
 
 ```{r}
-source("../time_series_modelling/data_weekly.R")
+source("../data_weekly.R", chdir = TRUE)
 ```
 
 
@@ -72,70 +72,6 @@ incidence_weekly_df %>%
   ggtitle("Dengue weekly incidence")
 ```
 
-## HCMC shape
-
-```{r}
-ggplot() +
-  geom_sf(data = hcmc_shp_w_buff) +
-  geom_sf(data = hcmc_shp)
-```
-
-## Weather data
-
-
-```{r}
-raw_weather
-```
-
-### Temperature data
-
-```{r}
-hcmc_temp_df %>%
-  ggplot(aes(x = date, y = t2m)) +
-  geom_line() +
-  geom_smooth() +
-  scale_x_yearweek("Week") +
-  scale_y_continuous("2m temperature") +
-  ggtitle("Weekly 2m temperature ERA5 reanalysis")
-
-hist(hcmc_temp_df$t2m)
-hist(hcmc_temp_df$scaled_t2m)
-```
-
-### Precipitation data
-
-```{r}
-hcmc_precip_df %>%
-  ggplot(aes(x = date, y = precip)) +
-  geom_line() +
-  geom_smooth() +
-  scale_x_yearweek("Week") +
-  scale_y_continuous("Total precipitation") +
-  ggtitle("Weekly Total precipitation ERA5 reanalysis")
-
-hist(hcmc_precip_df$precip)
-hist(hcmc_precip_df$scaled_precip)
-```
-
-### Humidity data
-
-```{r}
-hcmc_rh_df %>%
-  ggplot(aes(x = date, y = rh)) +
-  geom_line() +
-  geom_smooth() +
-  scale_x_yearweek("Week") +
-  scale_y_continuous("Total precipitation") +
-  ggtitle("Weekly Total precipitation ERA5 reanalysis")
-
-hist(hcmc_rh_df$rh)
-hist(hcmc_rh_df$scaled_rh)
-```
-
-```{r}
-incidence_weekly_weather_df
-```
-
 # Performance checking framework
 
 ```{r}
@@ -145,85 +81,297 @@ model_perfs <- tibble(
   MAE = numeric()
 )
 
-forecast_perf <- function(fit, newdata, model_name, plot = TRUE, res_print = TRUE, res_df = FALSE) {
-  forecast <- fit %>%
-    predict(newdata = newdata, type = "response") %>%
-    as.vector()
-  actual <- newdata$n
-
-  if (plot) {
-    forecast %>% plot(type = "l")
-  }
-
+forecast_perf <- function(forecast, actual, model_name) {
   rmse <- sqrt(mean((actual - forecast)^2))
   mae <- mean(abs(actual - forecast))
 
-  if (res_print) {
-    print(model_name)
-    print(sprintf("Test RMSE: %f", rmse))
-    print(sprintf("Test MAE: %f", mae))
-  }
+  print(sprintf("Test RMSE: %f", rmse))
+  print(sprintf("Test MAE: %f", mae))
 
+  model_perfs <<- model_perfs %>%
+    bind_rows(tibble(model = model_name, RMSE = rmse, MAE = mae))
+}
 
-  if (!res_df) {
-    model_perfs <<- model_perfs %>%
-      bind_rows(tibble(model = model_name, RMSE = rmse, MAE = mae))
-  }
-
-  if (plot) {
-    print(newdata %>%
-      mutate(forecast = forecast, actual = actual) %>%
-      ggplot(aes(x = date_admitted)) +
-      geom_line(aes(y = actual)) +
-      geom_line(aes(y = forecast), color = "red"))
-  }
-
-  if (res_df) {
-    return(tibble(model = model_name, RMSE = rmse, MAE = mae))
-  }
+forecast_plot_default <- function(fit_df, actual_df, plot_title) {
+  ggplot(actual_df) +
+    geom_line(aes(x = date_admitted, y = n)) +
+    forecast_layer(fit_df) +
+    scale_x_yearweek(
+      "Date",
+      breaks = as.Date(actual_df$date_admitted[seq(1, 52, 3)]),
+      labels = as.character(actual_df$date_admitted[seq(1, 52, 3)]) %>% str_extract("W\\d+"),
+      minor_breaks = NULL
+    ) +
+    scale_y_continuous("Incidence") +
+    ggtitle(plot_title)
 }
 ```
 
-# Lag effect
-
-## Hyperparamter tuning
-
-### Function
+# Model fitting and forecast framework
 
 ```{r}
-lag_apply <- function(k, covarDf, varcol) {
-  lagged_df <- incidence_weekly_df %>%
-    left_join(
-      covarDf %>% mutate(lagged_value = get(varcol) %>% lag(k)),
-      by = c("date_admitted" = "date")
+recur_miso <- function(
+    train_set, test_set,
+    start_indices,
+    model = list(), xreg_names = NULL,
+    horizon = 4,
+    link = c("identity", "log"), distr = c("poisson", "nbinom"),
+    cl = NULL) {
+  if (!missing(cl)) {
+    clusterEvalQ(cl, suppressPackageStartupMessages(library(magrittr)))
+    clusterEvalQ(cl, suppressPackageStartupMessages(library(dplyr)))
+    clusterEvalQ(cl, library(tscount))
+    clusterExport(cl, c("train_set", "test_set"), environment())
+  }
+  distr <- match.arg(distr)
+  link <- match.arg(link)
+
+  pbapply::pblapply(start_indices, \(start_idx) {
+    train_df <- train_set %>%
+      bind_rows(test_set %>% slice_head(n = start_idx)) %>%
+      tail(nrow(train_set))
+
+    if (!is.null(xreg_names)) {
+      xreg <- train_df %>%
+        as_tibble() %>%
+        select(all_of(xreg_names)) %>%
+        as.matrix()
+      newxreg <- test_set %>%
+        tail(52 - start_idx) %>%
+        head(horizon) %>%
+        as_tibble() %>%
+        select(all_of(xreg_names)) %>%
+        as.matrix()
+    } else {
+      xreg <- NULL
+      newxreg <- NULL
+    }
+
+    fit <- tsglm(train_df$n, model = model, link = link, distr = distr, xreg = xreg)
+    pred <- predict(fit, horizon, newobs = NULL, newxreg = newxreg)
+
+    tibble(
+      startweek = start_idx,
+      actualweek = start_idx + (1:horizon - 1),
+      preds = (pred$pred),
+      lowers = (pred$interval[, "lower"]),
+      uppers = (pred$interval[, "upper"]),
     )
-
-  train_df <- lagged_df %>%
-    filter_index("2000 W01" ~ "2017 W52")
-
-  test_df <- lagged_df %>%
-    filter_index("2018 W01" ~ "2018 W04")
-
-  fit <- glm(
-    n ~ date_admitted + lagged_value,
-    family = poisson(), data = train_df
-  )
-
-  forecast_perf(
-    fit, test_df, sprintf("lag=%d", k),
-    plot = FALSE, res_print = FALSE, res_df = TRUE
-  )
+  }, cl = cl) %>% list_c()
 }
 
-lagged_precip_df <- pbapply::pblapply(
-  c(0:52), lag_apply,
-  covarDf = hcmc_precip_df, varcol = "precip"
-) %>%
-  list_c() %>%
-  mutate(lag = str_extract(model, "\\d+") %>% as.numeric())
 
-lagged_precip_df %>% ggplot() +
-  geom_col(aes(x = lag, y = RMSE))
+forecast_layer <- function(frcst_df) {
+  # frcst_df <- forecast_df
+  frcst_df %<>% group_by(startweek) %>% group_split()
+
+  layers <- lapply(
+    frcst_df,
+    \(df)
+    c(layer(
+      data = df,
+      geom = "ribbon", stat = "identity", position = "identity",
+      mapping = aes(x = date, ymin = lowers, ymax = uppers),
+      params = list(alpha = 0.5, fill = "pink")
+    ), layer(
+      data = df,
+      geom = "line", stat = "identity", position = "identity",
+      mapping = aes(x = date, y = preds), params = list(color = "red")
+    ))
+  )
+  layers
+}
+```
+
+```{r}
+unregister_dopar <- function() {
+  env <- foreach:::.foreachGlobals
+  rm(list = ls(name = env), pos = env)
+}
+```
+
+
+# Lag effect
+
+## T2m 
+
+```{r}
+unregister_dopar()
+
+cl <- makeForkCluster(9)
+clusterEvalQ(cl, library(dplyr))
+clusterEvalQ(cl, library(tsibble))
+clusterEvalQ(cl, library(purrr))
+clusterEvalQ(cl, library(tscount))
+registerDoParallel(cl)
+
+t2m_lag_df <- foreach(lag = 1:52) %dopar% {
+  train_df <- incidence_weekly_weather_df %>%
+    mutate(t2m = lag(t2m, lag)) %>%
+    filter_index("2000 W01" ~ "2018 W52")
+
+  test_df <- incidence_weekly_weather_df %>%
+    mutate(t2m = lag(t2m, lag)) %>%
+    filter_index("2019 W01" ~ "2019 W52")
+
+
+  forecast_df <- recur_miso(
+    train_df, test_df,
+    seq(1, 49, 3),
+    model = list(past_obs = 1), xreg_names = c("t2m"),
+    link = "log", distr = "poisson"
+  ) %>%
+    mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
+
+  pre_perf <- forecast_df %>%
+    select(date, preds) %>%
+    left_join(test_weekly_df, by = c("date" = "date_admitted"))
+
+  rmse <- sqrt(mean((pre_perf$n - pre_perf$preds)^2))
+  mae <- mean(abs(pre_perf$n - pre_perf$preds))
+
+  tibble(model = sprintf("Poisson %d-week t2m lag", lag), RMSE = rmse, MAE = mae, lag = lag)
+}
+
+stopCluster(cl)
+```
+
+```{r}
+lowest_t2m_lag <- t2m_lag_df %>%
+  list_c() %>%
+  filter(RMSE == min(RMSE))
+
+t2m_lag_df %>%
+  list_c() %>%
+  ggplot(aes(x = lag, y = RMSE)) +
+  geom_col() +
+  geom_point(data = lowest_t2m_lag, shape = 4, color = "red")
+
+model_perfs %<>%
+  bind_rows(lowest_t2m_lag)
+
+ggsave("./svgs/forecast_poisson_all_t2m_lags.svg", width = 10, height = 7)
+```
+
+## Precipitation
+
+```{r}
+unregister_dopar()
+
+cl <- makeForkCluster(9)
+clusterEvalQ(cl, library(dplyr))
+clusterEvalQ(cl, library(tsibble))
+clusterEvalQ(cl, library(purrr))
+clusterEvalQ(cl, library(tscount))
+registerDoParallel(cl)
+
+precip_lag_df <- foreach(lag = 1:52) %dopar% {
+  train_df <- incidence_weekly_weather_df %>%
+    mutate(precip = lag(precip, lag)) %>%
+    filter_index("2000 W01" ~ "2018 W52")
+
+  test_df <- incidence_weekly_weather_df %>%
+    mutate(precip = lag(precip, lag)) %>%
+    filter_index("2019 W01" ~ "2019 W52")
+
+
+  forecast_df <- recur_miso(
+    train_df, test_df,
+    seq(1, 49, 3),
+    model = list(past_obs = 1), xreg_names = c("precip"),
+    link = "log", distr = "poisson"
+  ) %>%
+    mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
+
+  pre_perf <- forecast_df %>%
+    select(date, preds) %>%
+    left_join(test_weekly_df, by = c("date" = "date_admitted"))
+
+  rmse <- sqrt(mean((pre_perf$n - pre_perf$preds)^2))
+  mae <- mean(abs(pre_perf$n - pre_perf$preds))
+
+  tibble(model = sprintf("Poisson %d-week precip lag", lag), RMSE = rmse, MAE = mae, lag = lag)
+}
+
+stopCluster(cl)
+```
+
+```{r}
+lowest_precip_lag <- precip_lag_df %>%
+  list_c() %>%
+  filter(RMSE == min(RMSE))
+
+precip_lag_df %>%
+  list_c() %>%
+  ggplot(aes(x = lag, y = RMSE)) +
+  geom_col() +
+  geom_point(data = lowest_precip_lag, shape = 4, color = "red")
+
+model_perfs %<>%
+  bind_rows(lowest_precip_lag)
+
+ggsave("./svgs/forecast_poisson_all_precip_lags.svg", width = 10, height = 7)
+```
+
+
+## Relative humidity
+
+```{r}
+unregister_dopar()
+
+cl <- makeForkCluster(9)
+clusterEvalQ(cl, library(dplyr))
+clusterEvalQ(cl, library(tsibble))
+clusterEvalQ(cl, library(purrr))
+clusterEvalQ(cl, library(tscount))
+registerDoParallel(cl)
+
+rh_lag_df <- foreach(lag = 1:52) %dopar% {
+  train_df <- incidence_weekly_weather_df %>%
+    mutate(rh = lag(rh, lag)) %>%
+    filter_index("2000 W01" ~ "2018 W52")
+
+  test_df <- incidence_weekly_weather_df %>%
+    mutate(rh = lag(rh, lag)) %>%
+    filter_index("2019 W01" ~ "2019 W52")
+
+
+  forecast_df <- recur_miso(
+    train_df, test_df,
+    seq(1, 49, 3),
+    model = list(past_obs = 1), xreg_names = c("rh"),
+    link = "log", distr = "poisson"
+  ) %>%
+    mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
+
+  pre_perf <- forecast_df %>%
+    select(date, preds) %>%
+    left_join(test_weekly_df, by = c("date" = "date_admitted"))
+
+  rmse <- sqrt(mean((pre_perf$n - pre_perf$preds)^2))
+  mae <- mean(abs(pre_perf$n - pre_perf$preds))
+
+  tibble(model = sprintf("Poisson %d-week rh lag", lag), RMSE = rmse, MAE = mae, lag = lag)
+}
+
+stopCluster(cl)
+```
+
+```{r}
+lowest_rh_lag <- rh_lag_df %>%
+  list_c() %>%
+  filter(RMSE == min(RMSE))
+
+rh_lag_df %>%
+  list_c() %>%
+  ggplot(aes(x = lag, y = RMSE)) +
+  geom_col() +
+  geom_point(data = lowest_rh_lag, shape = 4, color = "red")
+
+model_perfs %<>%
+  bind_rows(lowest_rh_lag)
+
+ggsave("./svgs/forecast_poisson_all_rh_lags.svg", width = 10, height = 7)
 ```
 
 
