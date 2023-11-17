@@ -216,6 +216,9 @@ Sliding step: 4 weeks
 
 Performance assessment:
 
+- Root Mean Squared Error (RMSE): calculate RMSE for each 4-week forecast chunks and calculate average RMSE of the whole model.
+- Mean Absolute Error (MAE): similar calculations to RMSE.
+
 # Non-parametric models
 
 ## Mean {.smaller}
