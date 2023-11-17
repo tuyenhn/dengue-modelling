@@ -363,13 +363,13 @@ knitr::kable(par_perfs %>% filter(!startsWith(model, "Prophet")), format = "html
 ::: columns
 ::: {.column width="50%"}
 
-![4 week forecast - Prophet additive](svgs/forecast_prophet_multi.svg){#fig-prophet_addi fig-align="center"}
+![4 week forecast - Prophet additive](svgs/forecast_prophet_addi.svg){#fig-prophet_addi fig-align="center"}
 
 :::
 
 ::: {.column width="50%"}
 
-![4 week forecast - Prophet multiplicative](svgs/forecast_arimax_weather.svg){#fig-prophet_multi fig-align="center"}
+![4 week forecast - Prophet multiplicative](svgs/forecast_prophet_multi.svg){#fig-prophet_multi fig-align="center"}
 
 :::
 
