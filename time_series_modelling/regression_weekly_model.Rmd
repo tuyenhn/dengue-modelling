@@ -607,7 +607,7 @@ nb_1wl_pre_perf_df <- nb_covar_forecast_df %>%
   select(date, preds, startweek) %>%
   left_join(test_weekly_df, by = c("date" = "date_admitted"))
 
-forecast_perf(
+chunks_forecast_perf(
   nb_1wl_pre_perf_df, "NB 1-week lag"
 )
 ```
