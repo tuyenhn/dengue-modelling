@@ -1,4 +1,15 @@
+# Library
 ```{r}
+library(tidyverse)
+library(tsibble)
+library(sf)
+library(spdep)
+```
+
+# Data ingestion and cleaning
+```{r}
+incidence_full <- read_csv("incidence_full.csv", show_col_types = FALSE)
+
 incidence_full_renamed <- incidence_full %>%
   mutate(
     hospital = case_match(
@@ -44,7 +55,7 @@ incidence_full_renamed <- incidence_full %>%
     hospital = tolower(hospital),
     date_admitted = yearweek(date_admitted)
   ) %>%
-  filter(status == "in-patient") %>%
+  filter(status == "in-patient", hospital != "trung tâm y tế  huyện vĩnh hưng") %>%
   group_by(date_admitted, hospital) %>%
   summarise(n = n())
 
@@ -54,6 +65,8 @@ incidence_full_renamed
 ```
 
 
+# Time series - grouped
+
 ```{r fig.height=10, fig.width=20}
 incidence_full_renamed %>%
   ggplot() +
@@ -62,6 +75,8 @@ incidence_full_renamed %>%
 
 # plotly::ggplotly(p)
 ```
+
+# Total presence
 
 ```{r fig.height=10, fig.width=20}
 incidence_full_renamed %>%
@@ -91,6 +106,7 @@ incidence_full_presence_group <- incidence_full_renamed %>%
   mutate(hospital = fct_reorder(hospital, total_presence))
 ```
 
+## Bar chart
 ```{r fig.height=10, fig.width=15}
 incidence_full_presence_group %>%
   count(hospital, presence) %>%
@@ -101,7 +117,7 @@ incidence_full_presence_group %>%
   geom_col(aes(y = hospital, x = `0`))
 ```
 
-
+## Hit map
 ```{r fig.height=15, fig.width=20}
 incidence_full_presence_group %>%
   mutate(
@@ -113,7 +129,7 @@ incidence_full_presence_group %>%
   facet_wrap(~group, ncol = 1, scales = "free")
 ```
 
-
+## Scatter plot
 ```{r}
 incidence_full_presence_group %>%
   group_by(hospital) %>%
@@ -121,7 +137,89 @@ incidence_full_presence_group %>%
   summarise(with_data = sum(presence), incidence_pw = sum(n)) %>%
   ggplot(aes(y = with_data, x = log(incidence_pw))) +
   geom_point() +
-  geom_smooth() +
+  geom_smooth(method = "loess", formula = y ~ x) +
   scale_y_continuous("Incidence per week") +
   scale_x_continuous("Number of weeks with presence of data")
+```
+
+## Map
+
+```{r}
+hospital_groups <- incidence_full_presence_group %>%
+  select(hospital, group) %>%
+  distinct()
+```
+
+
+```{r}
+hospitals_geocoded <- hospital_groups %>%
+  mutate(hospital = str_replace_all(hospital, c("tphcm" = "", "tp.hcm" = ""))) %>%
+  mutate(hospital = paste0(hospital, ", tp hồ chí minh")) %>%
+  tidygeocoder::geocode(
+    hospital,
+    method = "arcgis", lat = lat, lon = lon
+  )
+```
+
+```{r}
+hospitals_geocoded
+```
+
+```{r}
+shp_lvl3 <- readRDS("./gadm/gadm41_VNM_3_pk.rds") %>%
+  terra::unwrap() %>%
+  st_as_sf() %>%
+  filter(GID_1 == "VNM.25_1")
+
+ggplot() +
+  geom_sf(data = shp_lvl3) +
+  geom_point(data = hospitals_geocoded, aes(x = lon, y = lat, color = as.factor(group)))
+```
+
+## Moran's I
+https://hughst.github.io/week-4/
+```{r}
+hosp_coords <- hospitals_geocoded %>%
+  select(lon, lat) %>%
+  rowid_to_column()
+
+hosp_coords_only <- hosp_coords %>% select(lon, lat)
+
+# Chosing a distance d such that pairs of points with distances less than
+# d are neighbors and those further apart are not
+
+neighbors <- knn2nb(
+  knearneigh(hosp_coords_only, k = 1, longlat = TRUE),
+  hosp_coords$rowid
+)
+
+neighbors
+
+# assigns at least one neighbor to each and calculates the distances between
+# returns the distance between nearest neighbors for each point
+dists <- unlist(nbdists(neighbors, hosp_coords_only))
+summary(dists)
+
+# maximum distance to provide at least one neighbor to each point
+max_1n <- max(dists)
+max_1n
+
+# Create different neighbor structures based upon distance
+
+# neighbors within maximum distance
+neigh_d1 <- dnearneigh(hosp_coords, d1 = 0, d2 = max_1n, row.names = hosp_coords$rowid)
+# neighbors within 2X maximum distance
+neigh_d2 <- dnearneigh(hosp_coords, d1 = 0, d2 = 2 * max_1n, row.names = hosp_coords$rowid)
+
+nb_1 <- list(d1 = neigh_d1, d2 = neigh_d2) # list of neighbor structures
+sapply(nb_1, function(x) is.symmetric.nb(x, verbose = F, force = T))
+
+# Checks for symmetry (i.e. if i is a neighbor of j, then j is a neighbor of i). Does not always hold for k-nearest neighbours
+sapply(nb_1, function(x) n.comp.nb(x)$nc)
+
+par(mfrow = c(2, 1), mar = c(1, 0, 1, 0))
+plot(hosp_coords$lon, hosp_coords$lat, pch = 16)
+plot(neigh_d1, hosp_coords_only, col = "green", add = T)
+plot(hosp_coords$lon, hosp_coords$lat, pch = 16)
+plot(neigh_d2, hosp_coords_only, col = "green", add = T)
 ```
