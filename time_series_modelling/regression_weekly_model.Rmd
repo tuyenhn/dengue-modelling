@@ -273,6 +273,13 @@ forecast_plot_default(
 ggsave("./svgs/forecast_poisson_l1w.svg", height = 7, width = 10)
 ```
 
+```{r}
+train_weekly_weather_df %>% model(TSLM(n ~ date_admitted)) %>% report()
+
+train_weekly_weather_df %>% ggplot(aes(x = date_admitted, y = n)) + geom_point() + geom_smooth(method = "lm")
+```
+
+
 
 ```{r}
 poi_1wl_pre_perf_df <- poi_covar_forecast_df %>%

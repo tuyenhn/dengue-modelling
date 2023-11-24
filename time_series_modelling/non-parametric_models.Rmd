@@ -13,6 +13,7 @@ output:
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
 library(magrittr)
+library(patchwork)
 
 library(feasts)
 library(fable.prophet)
@@ -60,28 +61,45 @@ train_weekly_df %>% tail()
 ### Performance checking 
 
 ```{r}
+source("../utils/distributional_eval.R", chdir = TRUE)
+```
+
+
+```{r}
 model_perfs <- tibble(
   model = character(),
   RMSE = numeric(),
-  MAE = numeric()
+  MAE = numeric(),
+  CRPS = numeric(),
 )
 
-chunks_forecast_perf <- function(frcst_df, model_name) {
+chunks_forecast_perf <- function(frcst_df, model_name, metrics = c("RMSE", "MAE", "CRPS")) {
+  what <- c(
+    RMSE = quo(sqrt(mean((n - .mean)^2))),
+    MAE = quo(mean(abs(n - .mean))),
+    CRPS = quo(crp_score(dist, n))
+  )
+
   res_df <- frcst_df %>%
     group_by(startweek) %>%
     summarise(
-      RMSE = sqrt(mean((n - .mean)^2)),
-      MAE = mean(abs(n - .mean))
+      data.frame(t(
+        sapply(metrics, function(metric) eval(what[[metric]]))
+      ))
     )
 
-  avg_rmse <- mean(res_df$RMSE)
-  avg_mae <- mean(res_df$MAE)
+  mean_df <- res_df %>%
+    summarise(across(all_of(metrics), mean)) %>%
+    mutate(model = model_name, .before = everything())
 
-  print(sprintf("Test mean RMSE: %f", avg_rmse))
-  print(sprintf("Test mean MAE: %f", avg_mae))
 
-  model_perfs <<- model_perfs %>%
-    bind_rows(tibble(model = model_name, RMSE = avg_rmse, MAE = avg_mae))
+  for (m in metrics) {
+    print(sprintf("Test mean %s: %f", m, mean_df[1, m]))
+  }
+
+  model_perfs <<- model_perfs %>% bind_rows(mean_df)
+
+  res_df
 }
 
 forecast_perf <- function(forecast, actual, model_name) {
@@ -96,8 +114,25 @@ forecast_perf <- function(forecast, actual, model_name) {
 }
 ```
 
+
 ### Forecast framework
 ```{r}
+metrics_plot <- function(frcst_res_df, dates) {
+  frcst_res_df %>%
+    slice(rep(1:n(), each = 4)) %>%
+    mutate(date = dates, .before = everything()) %>%
+    pivot_longer(-c(date, startweek), names_to = "Metric") %>%
+    ggplot() +
+    geom_line(aes(x = date, y = value, color = Metric)) +
+    scale_x_yearweek(
+      "Week",
+      breaks = test_weekly_df$date_admitted[seq(0, 52, 3) + 1],
+      labels = as.character(test_weekly_df$date_admitted[seq(0, 52, 3) + 1]) %>% str_extract("W\\d+"),
+      minor_breaks = NULL
+    ) +
+    scale_y_continuous("Metric value")
+}
+
 forecast_layer <- function(frcst_df, funnel = TRUE) {
   frcst_df %<>%
     group_by(startweek)
@@ -172,19 +207,14 @@ forecast_chunks <- function(
 ## Mean
 
 ```{r}
-v_pois_test <- function(x) {
-  ci <- sapply(x, \(x) poisson.test(x)$conf.int)
-  list(lower = ci[1, ], upper = ci[2, ])
-}
-
 mean_fit <- forecast_chunks(train_weekly_df, test_weekly_df, seq(0, 49, 3), MEAN, n)
 mean_fit %<>% mutate(
-  uppers = v_pois_test(round(.mean))$upper,
-  lowers = v_pois_test(round(.mean))$lower
+  n = distributional::dist_poisson(.mean),
+  uppers = hilo(n)$upper,
+  lowers = hilo(n)$lower
 )
 
-
-ggplot(test_weekly_df) +
+p1 <- ggplot(test_weekly_df) +
   geom_line(aes(x = date_admitted, y = n)) +
   forecast_layer(mean_fit, funnel = FALSE) +
   scale_x_yearweek(
@@ -195,16 +225,25 @@ ggplot(test_weekly_df) +
   ) +
   scale_y_continuous("Incidence") +
   ggtitle("4 week forecast - MEAN")
+p1
 
 ggsave("./svgs/forecast_mean_4w.svg", width = 10, height = 7)
 ```
 
 ```{r}
 pre_perf_df <- mean_fit %>%
-  select(date_admitted, .mean, startweek) %>%
+  select(date_admitted, n, .mean, startweek) %>%
+  rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_forecast_perf(pre_perf_df, "MEAN")
+chunks_forecast_res_df <- chunks_forecast_perf(pre_perf_df, "MEAN", c("RMSE", "MAE"))
+
+p2 <- metrics_plot(chunks_forecast_res_df, pre_perf_df$date_admitted)
+
+p1 / p2
+
+
+ggsave("./svgs/forecast_mean_4w_metric.svg", width = 10, height = 7)
 ```
 
 
@@ -259,29 +298,30 @@ ggsave("./svgs/forecast_smean_4w.svg", width = 10, height = 7)
 
 ```{r}
 forecast_perf(
-  smean_forecast %>% head(4) %>% as_tibble() %>% pull(smean),
-  test_weekly_weather_df %>% pull(n),
+  smean_forecast$smean,
+  test_weekly_weather_df$n,
   "Seasonal mean"
 )
 
 forecast_perf(
-  smean_forecast %>% head(4) %>% as_tibble() %>% pull(smean_w),
-  test_weekly_weather_df %>% pull(n),
+  smean_forecast$smean_w,
+  test_weekly_weather_df$n,
   "Seasonal mean weighted"
 )
 
 forecast_perf(
-  smean_forecast %>% head(4) %>% as_tibble() %>% pull(smean_w_exp),
-  test_weekly_weather_df %>% pull(n),
+  smean_forecast$smean_w_exp,
+  test_weekly_weather_df$n,
   "Seasonal mean exponentially weighted"
 )
 ```
 
 ## NAIVE
+
 ```{r}
 naive_fit <- forecast_chunks(train_weekly_df, test_weekly_df, seq(0, 49, 3), NAIVE, n)
 
-ggplot(test_weekly_df) +
+p1 <- ggplot(test_weekly_df) +
   geom_line(aes(x = date_admitted, y = n)) +
   forecast_layer(naive_fit) +
   scale_x_yearweek(
@@ -292,6 +332,7 @@ ggplot(test_weekly_df) +
   ) +
   scale_y_continuous("Incidence") +
   ggtitle("4 week forecast - NAIVE")
+p1
 
 ggsave("./svgs/forecast_naive_4w.svg", width = 10, height = 7)
 ```
@@ -299,10 +340,17 @@ ggsave("./svgs/forecast_naive_4w.svg", width = 10, height = 7)
 
 ```{r}
 pre_perf_df <- naive_fit %>%
-  select(date_admitted, .mean, startweek) %>%
+  select(date_admitted, n, .mean, startweek) %>%
+  rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_forecast_perf(pre_perf_df, "NAIVE")
+chunks_forecast_res_df <- chunks_forecast_perf(pre_perf_df, "NAIVE")
+
+p2 <- metrics_plot(chunks_forecast_res_df, pre_perf_df$date_admitted)
+
+p1 / p2
+
+ggsave("./svgs/forecast_naive_4w_metric.svg", width = 10, height = 7)
 ```
 
 ## SNAIVE
@@ -324,10 +372,17 @@ snaive_fit %>%
   theme(legend.position = "none")
 
 ggsave("./svgs/forecast_snaive_4w.svg", width = 10, height = 7)
+```
+
+
+```{r}
+snaive_fcst <- snaive_fit %>%
+  forecast(h = 52) %>%
+  as_tibble()
 
 forecast_perf(
-  snaive_fit %>% forecast(h = 4) %>% as_tibble() %>% pull(.mean),
-  test_weekly_weather_df %>% pull(n),
+  snaive_fcst$.mean,
+  test_weekly_weather_df$n,
   "SNAIVE"
 )
 ```
@@ -351,7 +406,7 @@ drift_fit <- forecast_chunks(
   train_weekly_df, test_weekly_df, seq(0, 49, 3), RW, n ~ drift()
 )
 
-ggplot(test_weekly_df) +
+p1 <- ggplot(test_weekly_df) +
   geom_line(aes(x = date_admitted, y = n)) +
   forecast_layer(drift_fit) +
   scale_x_yearweek(
@@ -362,6 +417,7 @@ ggplot(test_weekly_df) +
   ) +
   scale_y_continuous("Incidence") +
   ggtitle("4 week forecast - DRIFT")
+p1
 
 ggsave("./svgs/forecast_drift_4w.svg", width = 10, height = 7)
 ```
@@ -369,10 +425,19 @@ ggsave("./svgs/forecast_drift_4w.svg", width = 10, height = 7)
 
 ```{r}
 pre_perf_df <- drift_fit %>%
-  select(date_admitted, .mean, startweek) %>%
+  select(date_admitted, n, .mean, startweek) %>%
+  rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_forecast_perf(pre_perf_df, "Drift")
+
+chunks_forecast_res_df <- chunks_forecast_perf(pre_perf_df, "Drift")
+
+p2 <- metrics_plot(chunks_forecast_res_df, pre_perf_df$date_admitted)
+
+p1 / p2
+
+
+ggsave("./svgs/forecast_drift_4w_metric.svg", width = 10, height = 7)
 ```
 
 # Comparison

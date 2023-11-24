@@ -76,6 +76,22 @@ incidence_full_renamed %>%
 # plotly::ggplotly(p)
 ```
 
+```{r}
+temp <- incidence_full_renamed %>%
+  mutate(n = ifelse(is.na(n), 0, n)) %>%
+  group_by(hospital) %>%
+  summarise(n = sum(n))
+
+(temp %>%
+  filter(hospital == "bênh viện bệnh nhiệt đới tphcm") %>%
+  pull(n)) / sum(temp$n)
+
+(temp %>%
+  filter(hospital == "bệnh viện nhi đồng 2") %>%
+  pull(n)) / sum(temp$n)
+```
+
+
 # Total presence
 
 ```{r fig.height=10, fig.width=20}
@@ -176,28 +192,27 @@ ggplot() +
   geom_point(data = hospitals_geocoded, aes(x = lon, y = lat, color = as.factor(group)))
 ```
 
-## Moran's I
-https://hughst.github.io/week-4/
+### Moran's I
+
 ```{r}
 hosp_coords <- hospitals_geocoded %>%
   select(lon, lat) %>%
-  rowid_to_column()
-
-hosp_coords_only <- hosp_coords %>% select(lon, lat)
+  sp::coordinates()
+hosp_ids <- row.names(as.data.frame(hosp_coords))
 
 # Chosing a distance d such that pairs of points with distances less than
 # d are neighbors and those further apart are not
 
 neighbors <- knn2nb(
-  knearneigh(hosp_coords_only, k = 1, longlat = TRUE),
-  hosp_coords$rowid
+  knearneigh(hosp_coords, k = 1, longlat = TRUE),
+  row.names = hosp_ids
 )
 
 neighbors
 
 # assigns at least one neighbor to each and calculates the distances between
 # returns the distance between nearest neighbors for each point
-dists <- unlist(nbdists(neighbors, hosp_coords_only))
+dists <- unlist(nbdists(neighbors, hosp_coords))
 summary(dists)
 
 # maximum distance to provide at least one neighbor to each point
@@ -207,9 +222,9 @@ max_1n
 # Create different neighbor structures based upon distance
 
 # neighbors within maximum distance
-neigh_d1 <- dnearneigh(hosp_coords, d1 = 0, d2 = max_1n, row.names = hosp_coords$rowid)
+neigh_d1 <- dnearneigh(hosp_coords, d1 = 0, d2 = max_1n, row.names = hosp_ids)
 # neighbors within 2X maximum distance
-neigh_d2 <- dnearneigh(hosp_coords, d1 = 0, d2 = 2 * max_1n, row.names = hosp_coords$rowid)
+neigh_d2 <- dnearneigh(hosp_coords, d1 = 0, d2 = 2 * max_1n, row.names = hosp_ids)
 
 nb_1 <- list(d1 = neigh_d1, d2 = neigh_d2) # list of neighbor structures
 sapply(nb_1, function(x) is.symmetric.nb(x, verbose = F, force = T))
@@ -218,8 +233,16 @@ sapply(nb_1, function(x) is.symmetric.nb(x, verbose = F, force = T))
 sapply(nb_1, function(x) n.comp.nb(x)$nc)
 
 par(mfrow = c(2, 1), mar = c(1, 0, 1, 0))
-plot(hosp_coords$lon, hosp_coords$lat, pch = 16)
-plot(neigh_d1, hosp_coords_only, col = "green", add = T)
-plot(hosp_coords$lon, hosp_coords$lat, pch = 16)
-plot(neigh_d2, hosp_coords_only, col = "green", add = T)
+plot(hosp_coords, pch = 16)
+plot(neigh_d1, hosp_coords, col = "green", add = T)
+plot(hosp_coords, pch = 16)
+plot(neigh_d2, hosp_coords, col = "green", add = T)
+
+# assign weights;
+# row standardized binary weights, using minimum distance for one neighbor
+weights <- nb2listw(neigh_d1, style = "W")
+# "B" is simplest binary weights
+weights
+
+moran.test(hospitals_geocoded$group, listw = weights) # using row standardised weights
 ```
