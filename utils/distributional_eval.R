@@ -30,7 +30,7 @@ crp_score <- function(dist, y) {
   mu <- mean(dist)
   sigma <- sqrt(distributional::variance(dist))
   z_score <- (y - mu) / sigma
-
+  
   crps <- sigma * ((1 / sqrt(pi)) - 2 * dnorm(z_score) - (z_score * (2 * pnorm(z_score) - 1)))
 
   mean(crps)
