@@ -1,4 +1,4 @@
-chunks_forecast_perf <- function(frcst_df, model_name, metrics = c("RMSE", "CRPS"), crps_fn = NULL, ...) {
+chunks_forecast_perf <- function(frcst_df, model_name, crps_fn = NULL, ..., metrics = c("RMSE", "CRPS")) {
   # browser()
 
   elips <- enquos(...)

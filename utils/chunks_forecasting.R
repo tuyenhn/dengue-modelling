@@ -9,12 +9,13 @@ forecast_chunks <- function(
     clusterExport(cl, c("train_set", "test_set"), environment())
   }
   model_fn <- match.fun(model_fn)
-
+  
+  # browser()
+  
   pbapply::pblapply(start_indices, \(start_idx){
     train_df <- train_set %>%
       bind_rows(test_set %>% slice_head(n = start_idx)) %>%
       tail(nrow(train_set))
-
 
     fit <- train_df %>% model(model = model_fn(!!enquo(formula), ...))
 

@@ -388,7 +388,10 @@ pre_perf_df <- arima_chunks_fit %>%
   rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_forecast_res_df <- chunks_forecast_perf(pre_perf_df, "ARIMA(3,1,3)")
+chunks_forecast_res_df <- chunks_forecast_perf(
+  pre_perf_df, "ARIMA(3,1,3)", c("RMSE", "CRPS"),
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
 
 p2 <- metrics_plot(chunks_forecast_res_df, pre_perf_df$date_admitted)
 
@@ -416,54 +419,53 @@ arimax_models <- parLapply(
 
 stopCluster(cl)
 
+local_get_coef <- \(fit) fit %>%
+  coef() %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
 
 arimax_t2m_fit <- arimax_models[[1]]
 report(arimax_t2m_fit)
-t2m_coefs <- arimax_t2m_fit %>%
-  coef() %>%
-  select(c(term, estimate)) %>%
-  deframe() %>%
-  as.list()
-t2m_coefs
+t2m_coefs <- local_get_coef(arimax_t2m_fit)
+# t2m_coefs
 
 arimax_precip_fit <- arimax_models[[2]]
 report(arimax_precip_fit)
-precip_coefs <- arimax_precip_fit %>%
-  coef() %>%
-  select(c(term, estimate)) %>%
-  deframe() %>%
-  as.list()
-precip_coefs
+precip_coefs <- local_get_coef(arimax_precip_fit)
+# precip_coefs
 
 arimax_rh_fit <- arimax_models[[3]]
 report(arimax_rh_fit)
-rh_coefs <- arimax_rh_fit %>%
-  coef() %>%
-  select(c(term, estimate)) %>%
-  deframe() %>%
-  as.list()
-rh_coefs
+rh_coefs <- local_get_coef(arimax_rh_fit)
+# rh_coefs
 ```
 
 ### Chunks
 
 ```{r}
-arimax_t2m_chunks_fit <- forecast_chunks(
-  train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, log(n) ~ xreg(t2m, fixed = t2m_coefs[7]) + pdq(3, 1, 3, fixed = t2m_coefs[-7]) + PDQ(0, 0, 0)
-)
+fn1 <- function() {
+  forecast_chunks(
+    train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3), ARIMA, log(n) ~ xreg(t2m, fixed = t2m_coefs[7]) + pdq(3, 1, 3, fixed = t2m_coefs[-7]) + PDQ(0, 0, 0))
+}
+
+fn2 <- function(){
+  forecast_chunks(
+    train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3), ARIMA, log(n) ~ xreg(precip, fixed = precip_coefs[7]) + pdq(3, 1, 3, fixed = precip_coefs[-7]) + PDQ(0, 0, 0))
+}
+
+fn3 <- function(){
+  forecast_chunks(
+    train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3), ARIMA, log(n) ~ xreg(rh, fixed = rh_coefs[7]) + pdq(2, 1, 4, fixed = rh_coefs[-7]) + PDQ(0, 0, 0))
+}
+
+expr_v <- c(substitute(fn1()), substitute(fn2()), substitute(fn3()))
+fits <- mclapply(expr_v, eval, mc.cores = 3)
+setNames(fits, c("arimax_t2m_chunks_fit", "arimax_precip_chunks_fit", "arimax_rh_chunks_fit")) %>% 
+  list2env(envir = .GlobalEnv)
+
 arimax_t2m_chunks_fit
-
-arimax_precip_chunks_fit <- forecast_chunks(
-  train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, log(n) ~ xreg(precip, fixed = precip_coefs[7]) + pdq(3, 1, 3, fixed = precip_coefs[-7]) + PDQ(0, 0, 0)
-)
 arimax_precip_chunks_fit
-
-arimax_rh_chunks_fit <- forecast_chunks(
-  train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, log(n) ~ xreg(rh, fixed = rh_coefs[7]) + pdq(2, 1, 4, fixed = rh_coefs[-7]) + PDQ(0, 0, 0)
-)
 arimax_rh_chunks_fit
 ```
 
@@ -500,8 +502,11 @@ t2m_pre_perf_df <- arimax_t2m_chunks_fit %>%
   rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_t2m_forecast_res_df <- chunks_forecast_perf(t2m_pre_perf_df, "ARIMA(3,1,3) + t2m")
-p2_t2m <- metrics_plot(chunks_t2m_forecast_res_df, pre_perf_df$date_admitted)
+chunks_t2m_forecast_res_df <- chunks_forecast_perf(
+  t2m_pre_perf_df, "ARIMA(3,1,3) + t2m", 
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
+p2_t2m <- metrics_plot(chunks_t2m_forecast_res_df, t2m_pre_perf_df$date_admitted)
 
 p1_t2m / p2_t2m
 
@@ -510,8 +515,11 @@ precip_pre_perf_df <- arimax_precip_chunks_fit %>%
   rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_precip_forecast_res_df <- chunks_forecast_perf(precip_pre_perf_df, "ARIMA(3,1,3) + precip")
-p2_precip <- metrics_plot(chunks_precip_forecast_res_df, pre_perf_df$date_admitted)
+chunks_precip_forecast_res_df <- chunks_forecast_perf(
+  precip_pre_perf_df, "ARIMA(3,1,3) + precip", 
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
+p2_precip <- metrics_plot(chunks_precip_forecast_res_df, precip_pre_perf_df$date_admitted)
 
 p1_precip / p2_precip
 
@@ -520,8 +528,11 @@ rh_pre_perf_df <- arimax_rh_chunks_fit %>%
   rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_rh_forecast_res_df <- chunks_forecast_perf(rh_pre_perf_df, "ARIMA(2,1,4) + rh")
-p2_rh <- metrics_plot(chunks_rh_forecast_res_df, pre_perf_df$date_admitted)
+chunks_rh_forecast_res_df <- chunks_forecast_perf(
+  rh_pre_perf_df, "ARIMA(2,1,4) + rh", 
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
+p2_rh <- metrics_plot(chunks_rh_forecast_res_df, rh_pre_perf_df$date_admitted)
 
 p1_rh / p2_rh
 ```
@@ -529,61 +540,77 @@ p1_rh / p2_rh
 ### Combining covars
 
 ```{r}
-get_coefs <- \(fit) fit %>%
-  coef() %>%
-  select(c(term, estimate)) %>%
-  deframe() %>%
-  as.list()
+cl <- makeCluster(9)
+clusterEvalQ(cl, suppressPackageStartupMessages(library(dplyr)))
+clusterEvalQ(cl, suppressPackageStartupMessages(library(fable)))
+clusterEvalQ(cl, suppressPackageStartupMessages(library(fabletools)))
+clusterExport(cl, c("train_weekly_weather_df"))
 
-arimax_t2m_precip_fit <- train_weekly_weather_df %>%
-  model(ARIMA(log(n) ~ xreg(t2m, precip) + PDQ(0, 0, 0), stepwise = FALSE))
-arimax_t2m_rh_fit <- train_weekly_weather_df %>%
-  model(ARIMA(log(n) ~ xreg(t2m, rh) + PDQ(0, 0, 0), stepwise = FALSE))
-arimax_precip_rh_fit <- train_weekly_weather_df %>%
-  model(ARIMA(log(n) ~ xreg(precip, rh) + PDQ(0, 0, 0), stepwise = FALSE))
-arimax_weather_fit <- train_weekly_weather_df %>%
-  model(ARIMA(log(n) ~ xreg(t2m, precip, rh) + PDQ(0, 0, 0), stepwise = FALSE))
+arimax_models <- parLapply(
+  cl = cl,
+  c(
+    log(n) ~ xreg(t2m, precip) + PDQ(0, 0, 0),
+    log(n) ~ xreg(t2m, rh) + PDQ(0, 0, 0),
+    log(n) ~ xreg(precip, rh) + PDQ(0, 0, 0),
+    log(n) ~ xreg(t2m, precip, rh) + PDQ(0, 0, 0)
+  ),
+  \(formula) train_weekly_weather_df %>% model(ARIMA(formula, stepwise = FALSE))
+)
 
-t2m_precip_coefs <- get_coefs(arimax_t2m_precip_fit)
+stopCluster(cl)
+
+t2m_precip_coefs <- local_get_coef(arimax_t2m_precip_fit)
 arimax_t2m_precip_fit
 # t2m_precip_coefs
-t2m_rh_coefs <- get_coefs(arimax_t2m_rh_fit)
+t2m_rh_coefs <- local_get_coef(arimax_t2m_rh_fit)
 arimax_t2m_rh_fit
 # t2m_rh_coefs
-precip_rh_coefs <- get_coefs(arimax_precip_rh_fit)
+precip_rh_coefs <- local_get_coef(arimax_precip_rh_fit)
 arimax_precip_rh_fit
 # precip_rh_coefs
-weather_coefs <- get_coefs(arimax_weather_fit)
+weather_coefs <- local_get_coef(arimax_weather_fit)
 arimax_weather_fit
 # weather_coefs
 ```
 
 
 ```{r}
-arimax_t2m_precip_fit <- forecast_chunks(
-  train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA,
-  log(n) ~ xreg(t2m, precip, fixed = t2m_precip_coefs[c(7, 8)]) + pdq(3, 1, 3, fixed = t2m_precip_coefs[-c(7, 8)]) + PDQ(0, 0, 0)
-)
-arimax_t2m_precip_fit
+fn1 <- function(){
+  forecast_chunks(
+    train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3), ARIMA,
+log(n) ~ xreg(t2m, precip, fixed = t2m_precip_coefs[c(7, 8)]) + pdq(3, 1, 3, fixed = t2m_precip_coefs[-c(7, 8)]) + PDQ(0, 0, 0)
+)}
 
-arimax_t2m_rh_fit <- forecast_chunks(
-  train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, log(n) ~ xreg(t2m, rh, fixed = t2m_rh_coefs[c(7, 8)]) + pdq(3, 1, 3, fixed = t2m_rh_coefs[-c(7, 8)]) + PDQ(0, 0, 0)
-)
-arimax_t2m_rh_fit
+fn2 <- function(){
+  forecast_chunks(
+    train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3), ARIMA, log(n) ~ xreg(t2m, rh, fixed = t2m_rh_coefs[c(7, 8)]) + pdq(3, 1, 3, fixed = t2m_rh_coefs[-c(7, 8)]) + PDQ(0, 0, 0)
+)}
 
-arimax_precip_rh_fit <- forecast_chunks(
-  train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, log(n) ~ xreg(precip, rh, fixed = precip_rh_coefs[c(7, 8)]) + pdq(2, 1, 4, fixed = precip_rh_coefs[-c(7, 8)]) + PDQ(0, 0, 0)
-)
-arimax_precip_rh_fit
+fn3 <- function(){
+  forecast_chunks(
+    train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3), ARIMA, log(n) ~ xreg(precip, rh, fixed = precip_rh_coefs[c(7, 8)]) + pdq(2, 1, 4, fixed = precip_rh_coefs[-c(7, 8)]) + PDQ(0, 0, 0)
+)}
 
-arimax_weather_fit <- forecast_chunks(
-  train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3),
-  ARIMA, log(n) ~ xreg(t2m, precip, rh, fixed = weather_coefs[c(7, 8, 9)]) + pdq(3, 1, 3, fixed = weather_coefs[-c(7, 8, 9)]) + PDQ(0, 0, 0),
+fn4 <- function(){
+  forecast_chunks(
+    train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3), ARIMA, log(n) ~ xreg(t2m, precip, rh, fixed = weather_coefs[c(7, 8, 9)]) + pdq(3, 1, 3, fixed = weather_coefs[-c(7, 8, 9)]) + PDQ(0, 0, 0),
   stepwise = FALSE
-)
+)}
+
+
+expr_v <- c(substitute(fn1()), substitute(fn2()), substitute(fn3()), substitute(fn4()))
+fits <- mclapply(expr_v, eval, mc.cores = 4)
+setNames(fits, c(
+  "arimax_t2m_precip_fit",
+  "arimax_t2m_rh_fit",
+  "arimax_precip_rh_fit",
+  "arimax_weather_fit"
+)) %>% 
+  list2env(envir = .GlobalEnv)
+
+arimax_t2m_precip_fit
+arimax_t2m_rh_fit
+arimax_precip_rh_fit
 arimax_weather_fit
 ```
 
@@ -627,8 +654,13 @@ t2m_precip_pre_perf_df <- arimax_t2m_precip_fit %>%
   rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_t2m_precip_forecast_res_df <- chunks_forecast_perf(t2m_precip_pre_perf_df, "ARIMA(3,1,3) + t2m + tp")
-p2_t2m_precip <- metrics_plot(chunks_t2m_precip_forecast_res_df, t2m_precip_pre_perf_df$date_admitted)
+chunks_t2m_precip_forecast_res_df <- chunks_forecast_perf(
+  t2m_precip_pre_perf_df, "ARIMA(3,1,3) + t2m + tp",
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
+p2_t2m_precip <- metrics_plot(
+  chunks_t2m_precip_forecast_res_df, t2m_precip_pre_perf_df$date_admitted
+)
 p1_t2m_precip / p2_t2m_precip
 
 t2m_rh_pre_perf_df <- arimax_t2m_rh_fit %>%
@@ -636,8 +668,13 @@ t2m_rh_pre_perf_df <- arimax_t2m_rh_fit %>%
   rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_t2m_rh_forecast_res_df <- chunks_forecast_perf(t2m_rh_pre_perf_df, "ARIMA(3,1,3) + t2m + rh")
-p2_t2m_rh <- metrics_plot(chunks_t2m_rh_forecast_res_df, t2m_rh_pre_perf_df$date_admitted)
+chunks_t2m_rh_forecast_res_df <- chunks_forecast_perf(
+  t2m_rh_pre_perf_df, "ARIMA(3,1,3) + t2m + rh",
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
+p2_t2m_rh <- metrics_plot(
+  chunks_t2m_rh_forecast_res_df, t2m_rh_pre_perf_df$date_admitted
+)
 p1_t2m_rh / p2_t2m_rh
 
 precip_rh_pre_perf_df <- arimax_precip_rh_fit %>%
@@ -645,8 +682,13 @@ precip_rh_pre_perf_df <- arimax_precip_rh_fit %>%
   rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_precip_rh_forecast_res_df <- chunks_forecast_perf(precip_rh_pre_perf_df, "ARIMA(2,1,4) + tp + rh")
-p2_precip_rh <- metrics_plot(chunks_precip_rh_forecast_res_df, precip_rh_pre_perf_df$date_admitted)
+chunks_precip_rh_forecast_res_df <- chunks_forecast_perf(
+  precip_rh_pre_perf_df, "ARIMA(2,1,4) + tp + rh",
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
+p2_precip_rh <- metrics_plot(
+  chunks_precip_rh_forecast_res_df, precip_rh_pre_perf_df$date_admitted
+)
 p1_precip_rh / p2_precip_rh
 
 weather_pre_perf_df <- arimax_weather_fit %>%
@@ -654,8 +696,13 @@ weather_pre_perf_df <- arimax_weather_fit %>%
   rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_weather_forecast_res_df <- chunks_forecast_perf(weather_pre_perf_df, "ARIMA(3,1,3) + t2m + tp + rh")
-p2_weather <- metrics_plot(chunks_weather_forecast_res_df, weather_pre_perf_df$date_admitted)
+chunks_weather_forecast_res_df <- chunks_forecast_perf(
+  weather_pre_perf_df, "ARIMA(3,1,3) + t2m + tp + rh",
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
+p2_weather <- metrics_plot(
+  chunks_weather_forecast_res_df, weather_pre_perf_df$date_admitted
+)
 p1_weather / p2_weather
 ```
 
