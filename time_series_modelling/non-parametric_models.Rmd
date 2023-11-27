@@ -69,113 +69,13 @@ model_perfs <- tibble(
   CRPS = numeric(),
 )
 
-chunks_forecast_perf <- function(frcst_df, model_name, metrics = c("RMSE", "CRPS"), crps_fn = NULL, ...) {
-  # browser()
-
-  elips <- enquos(...)
-  if ("CRPS" %in% metrics) {
-    if (is.null(crps_fn)) {
-      stop("`crps_fn` needs to be provided if CRPS is in `metrics`")
-    } else {
-      CRPS <- quo(mean(crps_fn(n, !!!elips)))
-    }
-  }
-
-  what <- c(
-    RMSE = quo(sqrt(mean((n - .mean)^2))),
-    # CRPS = quo(crp_score(dist, n))
-    CRPS = CRPS
-  )
-
-  res_df <- frcst_df %>%
-    group_by(startweek) %>%
-    summarise(
-      data.frame(t(
-        sapply(metrics, \(metric) eval(what[[metric]]))
-      ))
-    )
-
-  mean_df <- res_df %>%
-    summarise(across(all_of(metrics), mean)) %>%
-    mutate(model = model_name, .before = everything())
-
-
-  for (m in metrics) {
-    print(sprintf("Test mean %s: %f", m, mean_df[1, m]))
-  }
-
-  model_perfs <<- model_perfs %>% bind_rows(mean_df)
-
-  res_df
-}
-
-forecast_perf <- function(forecast, actual, model_name) {
-  rmse <- sqrt(mean((actual - forecast)^2))
-
-  print(sprintf("Test RMSE: %f", rmse))
-
-  model_perfs <<- model_perfs %>%
-    bind_rows(tibble(model = model_name, RMSE = rmse))
-}
+source("../utils/performance_checking_framework.R", chdir = TRUE)
 ```
 
 
 ### Forecast framework
 ```{r}
-metrics_plot <- function(frcst_res_df, dates) {
-  frcst_res_df %>%
-    slice(rep(1:n(), each = 4)) %>%
-    mutate(date = dates, .before = everything()) %>%
-    pivot_longer(-c(date, startweek), names_to = "Metric") %>%
-    ggplot() +
-    geom_line(aes(x = date, y = value, color = Metric)) +
-    scale_x_yearweek(
-      "Week",
-      breaks = test_weekly_df$date_admitted[seq(0, 52, 3) + 1],
-      labels = as.character(test_weekly_df$date_admitted[seq(0, 52, 3) + 1]) %>% str_extract("W\\d+"),
-      minor_breaks = NULL
-    ) +
-    scale_y_continuous("Metric value")
-}
-
-forecast_layer <- function(frcst_df, funnel = TRUE) {
-  frcst_df %<>%
-    group_by(startweek)
-
-  if (funnel) {
-    frcst_df %<>%
-      group_map(\(.x, .y){
-        target_date <- min(.x$date_admitted) - 1
-        target_row <- incidence_weekly_df %>%
-          filter(date_admitted == target_date) %>%
-          mutate(.mean = n, uppers = n, lowers = n, startweek = .y$startweek)
-
-        .x %>%
-          mutate(startweek = .y$startweek) %>%
-          add_row(
-            target_row,
-            .before = 0
-          )
-      }) %>%
-      list_c() %>%
-      group_by(startweek)
-  }
-
-  lapply(
-    frcst_df %>% group_split(),
-    \(df)
-    c(layer(
-      data = df,
-      geom = "ribbon", stat = "identity", position = "identity",
-      mapping = aes(x = date_admitted, ymin = lowers, ymax = uppers),
-      params = list(alpha = 0.5, fill = "pink")
-    ), layer(
-      data = df,
-      geom = "line", stat = "identity", position = "identity",
-      mapping = aes(x = date_admitted, y = .mean), params = list(color = "red")
-    ))
-  )
-}
+source("../utils/forecast_plotting.R", chdir = TRUE)
 
 forecast_chunks <- function(
     train_set, test_set,
