@@ -21,6 +21,8 @@ library(pbapply)
 library(parallel)
 library(foreach)
 library(doParallel)
+
+library(distributional)
 ```
 
 # Settings
@@ -129,28 +131,66 @@ incidence_weekly_weather_df %>%
 ## Performance checking framework
 
 ```{r}
+source("../utils/distributional_eval.R", chdir = TRUE)
+
 model_perfs <- tibble(
   model = character(),
   RMSE = numeric(),
-  MAE = numeric()
+  MAE = numeric(),
+  CRPS = numeric(),
 )
 
-chunks_forecast_perf <- function(frcst_df, model_name) {
+chunks_forecast_perf <- function(frcst_df, model_name, metrics = c("RMSE", "MAE", "CRPS")) {
+  what <- c(
+    RMSE = quo(sqrt(mean((n - preds)^2))),
+    MAE = quo(mean(abs(n - preds))),
+    CRPS = quo(crp_score(dist, n))
+  )
+
   res_df <- frcst_df %>%
     group_by(startweek) %>%
     summarise(
-      RMSE = sqrt(mean((n - preds)^2)),
-      MAE = mean(abs(n - preds))
+      data.frame(t(
+        sapply(metrics, function(metric) eval(what[[metric]]))
+      ))
     )
 
-  avg_rmse <- mean(res_df$RMSE)
-  avg_mae <- mean(res_df$MAE)
+  mean_df <- res_df %>%
+    summarise(across(all_of(metrics), mean)) %>%
+    mutate(model = model_name, .before = everything())
 
-  print(sprintf("Test mean RMSE: %f", avg_rmse))
-  print(sprintf("Test mean MAE: %f", avg_mae))
 
-  model_perfs <<- model_perfs %>%
-    bind_rows(tibble(model = model_name, RMSE = avg_rmse, MAE = avg_mae))
+  for (m in metrics) {
+    print(sprintf("Test mean %s: %f", m, mean_df[1, m]))
+  }
+
+  model_perfs <<- model_perfs %>% bind_rows(mean_df)
+
+  res_df
+}
+```
+
+
+```{r}
+forecast_layer <- function(frcst_df) {
+  # frcst_df <- forecast_df
+  frcst_df %<>% group_by(startweek) %>% group_split()
+
+  layers <- lapply(
+    frcst_df,
+    \(df)
+    c(layer(
+      data = df,
+      geom = "ribbon", stat = "identity", position = "identity",
+      mapping = aes(x = date, ymin = lowers, ymax = uppers),
+      params = list(alpha = 0.5, fill = "pink")
+    ), layer(
+      data = df,
+      geom = "line", stat = "identity", position = "identity",
+      mapping = aes(x = date, y = preds), params = list(color = "red")
+    ))
+  )
+  layers
 }
 
 forecast_plot_default <- function(fit_df, actual_df, plot_title) {
@@ -158,9 +198,9 @@ forecast_plot_default <- function(fit_df, actual_df, plot_title) {
     geom_line(aes(x = date_admitted, y = n)) +
     forecast_layer(fit_df) +
     scale_x_yearweek(
-      "Date",
-      breaks = as.Date(actual_df$date_admitted[seq(1, 52, 3)]),
-      labels = as.character(actual_df$date_admitted[seq(1, 52, 3)]) %>% str_extract("W\\d+"),
+      "Week",
+      breaks = actual_df$date_admitted[seq(0, 52, 3) + 1],
+      labels = as.character(actual_df$date_admitted[seq(0, 52, 3) + 1]) %>% str_extract("W\\d+"),
       minor_breaks = NULL
     ) +
     scale_y_continuous("Incidence") +
@@ -212,36 +252,26 @@ recur_miso <- function(
     fit <- tsglm(train_df$n, model = model, link = link, distr = distr, xreg = xreg)
     pred <- predict(fit, horizon, newobs = NULL, newxreg = newxreg)
 
-    tibble(
+    forecast_df <- tibble(
       startweek = start_idx,
       actualweek = start_idx + (1:horizon - 1),
-      preds = (pred$pred),
-      lowers = (pred$interval[, "lower"]),
-      uppers = (pred$interval[, "upper"]),
+      preds = pred$pred,
+      # lowers = (pred$interval[, "lower"]),
+      # uppers = (pred$interval[, "upper"]),
     )
+
+    if (distr == "poisson") {
+      forecast_df %<>% mutate(
+        dist = dist_poisson(preds),
+        stdev_h = sqrt(preds) * sqrt(actualweek - startweek + 1),
+        lowers = (preds - 1.96 * stdev_h),
+        uppers = (preds + 1.96 * stdev_h)
+      )
+    }
+
+
+    forecast_df
   }, cl = cl) %>% list_c()
-}
-
-
-forecast_layer <- function(frcst_df) {
-  # frcst_df <- forecast_df
-  frcst_df %<>% group_by(startweek) %>% group_split()
-
-  layers <- lapply(
-    frcst_df,
-    \(df)
-    c(layer(
-      data = df,
-      geom = "ribbon", stat = "identity", position = "identity",
-      mapping = aes(x = date, ymin = lowers, ymax = uppers),
-      params = list(alpha = 0.5, fill = "pink")
-    ), layer(
-      data = df,
-      geom = "line", stat = "identity", position = "identity",
-      mapping = aes(x = date, y = preds), params = list(color = "red")
-    ))
-  )
-  layers
 }
 ```
 
@@ -273,17 +303,11 @@ forecast_plot_default(
 ggsave("./svgs/forecast_poisson_l1w.svg", height = 7, width = 10)
 ```
 
-```{r}
-train_weekly_weather_df %>% model(TSLM(n ~ date_admitted)) %>% report()
-
-train_weekly_weather_df %>% ggplot(aes(x = date_admitted, y = n)) + geom_point() + geom_smooth(method = "lm")
-```
-
 
 
 ```{r}
 poi_1wl_pre_perf_df <- poi_covar_forecast_df %>%
-  select(date, preds, startweek) %>%
+  select(date, dist, preds, startweek) %>%
   left_join(test_weekly_df, by = c("date" = "date_admitted"))
 
 chunks_forecast_perf(
@@ -303,7 +327,7 @@ clusterEvalQ(cl, library(tscount))
 clusterEvalQ(cl, library(tsibble))
 registerDoParallel(cl)
 
-auto_lagged_df <- foreach(lag = 1:52) %dopar% {
+auto_lagged_df <- foreach(lag = 1:20) %dopar% {
   forecast_df <- recur_miso(
     train_weekly_weather_df, test_weekly_weather_df,
     seq(1, 49, 3),
@@ -363,7 +387,7 @@ clusterEvalQ(cl, library(purrr))
 clusterEvalQ(cl, library(tscount))
 registerDoParallel(cl)
 
-t2m_lag_df <- foreach(lag = 1:52) %dopar% {
+t2m_lag_df <- foreach(lag = 1:20) %dopar% {
   train_df <- incidence_weekly_weather_df %>%
     mutate(t2m = lag(t2m, lag)) %>%
     filter_index("2000 W01" ~ "2018 W52")
@@ -427,7 +451,7 @@ clusterEvalQ(cl, library(purrr))
 clusterEvalQ(cl, library(tscount))
 registerDoParallel(cl)
 
-precip_lag_df <- foreach(lag = 1:52) %dopar% {
+precip_lag_df <- foreach(lag = 1:20) %dopar% {
   train_df <- incidence_weekly_weather_df %>%
     mutate(precip = lag(precip, lag)) %>%
     filter_index("2000 W01" ~ "2018 W52")
@@ -492,7 +516,7 @@ clusterEvalQ(cl, library(purrr))
 clusterEvalQ(cl, library(tscount))
 registerDoParallel(cl)
 
-rh_lag_df <- foreach(lag = 1:52) %dopar% {
+rh_lag_df <- foreach(lag = 1:20) %dopar% {
   train_df <- incidence_weekly_weather_df %>%
     mutate(rh = lag(rh, lag)) %>%
     filter_index("2000 W01" ~ "2018 W52")

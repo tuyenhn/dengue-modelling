@@ -19,6 +19,7 @@ library(feasts)
 library(fable.prophet)
 library(fabletools)
 library(fable)
+library(distributional)
 
 library(tsibble)
 library(lubridate)
@@ -28,6 +29,7 @@ library(parallel)
 
 ```{r}
 theme_set(theme_bw())
+set.seed(123)
 ```
 
 # Data ingestion
@@ -61,30 +63,35 @@ train_weekly_df %>% tail()
 ### Performance checking 
 
 ```{r}
-source("../utils/distributional_eval.R", chdir = TRUE)
-```
-
-
-```{r}
 model_perfs <- tibble(
   model = character(),
   RMSE = numeric(),
-  MAE = numeric(),
   CRPS = numeric(),
 )
 
-chunks_forecast_perf <- function(frcst_df, model_name, metrics = c("RMSE", "MAE", "CRPS")) {
+chunks_forecast_perf <- function(frcst_df, model_name, metrics = c("RMSE", "CRPS"), crps_fn = NULL, ...) {
+  # browser()
+
+  elips <- enquos(...)
+  if ("CRPS" %in% metrics) {
+    if (is.null(crps_fn)) {
+      stop("`crps_fn` needs to be provided if CRPS is in `metrics`")
+    } else {
+      CRPS <- quo(mean(crps_fn(n, !!!elips)))
+    }
+  }
+
   what <- c(
     RMSE = quo(sqrt(mean((n - .mean)^2))),
-    MAE = quo(mean(abs(n - .mean))),
-    CRPS = quo(crp_score(dist, n))
+    # CRPS = quo(crp_score(dist, n))
+    CRPS = CRPS
   )
 
   res_df <- frcst_df %>%
     group_by(startweek) %>%
     summarise(
       data.frame(t(
-        sapply(metrics, function(metric) eval(what[[metric]]))
+        sapply(metrics, \(metric) eval(what[[metric]]))
       ))
     )
 
@@ -104,13 +111,11 @@ chunks_forecast_perf <- function(frcst_df, model_name, metrics = c("RMSE", "MAE"
 
 forecast_perf <- function(forecast, actual, model_name) {
   rmse <- sqrt(mean((actual - forecast)^2))
-  mae <- mean(abs(actual - forecast))
 
   print(sprintf("Test RMSE: %f", rmse))
-  print(sprintf("Test MAE: %f", mae))
 
   model_perfs <<- model_perfs %>%
-    bind_rows(tibble(model = model_name, RMSE = rmse, MAE = mae))
+    bind_rows(tibble(model = model_name, RMSE = rmse))
 }
 ```
 
@@ -209,7 +214,7 @@ forecast_chunks <- function(
 ```{r}
 mean_fit <- forecast_chunks(train_weekly_df, test_weekly_df, seq(0, 49, 3), MEAN, n)
 mean_fit %<>% mutate(
-  n = distributional::dist_poisson(.mean),
+  n = dist_poisson(.mean),
   uppers = hilo(n)$upper,
   lowers = hilo(n)$lower
 )
@@ -236,7 +241,10 @@ pre_perf_df <- mean_fit %>%
   rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_forecast_res_df <- chunks_forecast_perf(pre_perf_df, "MEAN", c("RMSE", "MAE"))
+chunks_forecast_res_df <- chunks_forecast_perf(
+  pre_perf_df, "MEAN", c("RMSE", "CRPS"),
+  crps_fn = scoringRules::crps_pois, variance(dist)
+)
 
 p2 <- metrics_plot(chunks_forecast_res_df, pre_perf_df$date_admitted)
 
@@ -344,7 +352,10 @@ pre_perf_df <- naive_fit %>%
   rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_forecast_res_df <- chunks_forecast_perf(pre_perf_df, "NAIVE")
+chunks_forecast_res_df <- chunks_forecast_perf(
+  pre_perf_df, "NAIVE", c("RMSE", "CRPS"),
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
 
 p2 <- metrics_plot(chunks_forecast_res_df, pre_perf_df$date_admitted)
 
@@ -430,7 +441,10 @@ pre_perf_df <- drift_fit %>%
   left_join(test_weekly_df, by = "date_admitted")
 
 
-chunks_forecast_res_df <- chunks_forecast_perf(pre_perf_df, "Drift")
+chunks_forecast_res_df <- chunks_forecast_perf(
+  pre_perf_df, "Drift", c("RMSE", "CRPS"),
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
 
 p2 <- metrics_plot(chunks_forecast_res_df, pre_perf_df$date_admitted)
 
