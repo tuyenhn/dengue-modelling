@@ -1661,7 +1661,7 @@ mean</a></li>
 </ul>
 </div>
 
-<p><strong>Knitted at: 2023-11-27 16:57:40</strong></p>
+<p><strong>Knitted at: 2023-11-27 17:04:01</strong></p>
 <div id="library" class="section level1">
 <h1>Library</h1>
 <pre class="r"><code>library(tidyverse)
@@ -1719,36 +1719,7 @@ source(&quot;../utils/performance_checking_framework.R&quot;, chdir = TRUE)</cod
 <div id="forecast-framework" class="section level3">
 <h3>Forecast framework</h3>
 <pre class="r"><code>source(&quot;../utils/forecast_plotting.R&quot;, chdir = TRUE)
-
-forecast_chunks &lt;- function(
-    train_set, test_set,
-    start_indices,
-    model_fn, formula,
-    horizon = 4, cl = NULL) {
-  if (!missing(cl)) {
-    clusterExport(cl, c(&quot;train_set&quot;, &quot;test_set&quot;), environment())
-  }
-  model_fn &lt;- match.fun(model_fn)
-
-  pbapply::pblapply(start_indices, \(start_idx){
-    train_df &lt;- train_set %&gt;%
-      bind_rows(test_set %&gt;% slice_head(n = start_idx)) %&gt;%
-      tail(nrow(train_set))
-
-    fit &lt;- train_df %&gt;% model(model = model_fn(!!enquo(formula)))
-
-    fit %&gt;%
-      forecast(h = horizon) %&gt;%
-      as_tibble() %&gt;%
-      mutate(
-        .model = format(fit$model),
-        startweek = start_idx,
-        uppers = hilo(n)$upper,
-        lowers = hilo(n)$lower
-      )
-  }, cl = cl) %&gt;%
-    list_c()
-}</code></pre>
+source(&quot;../utils/chunks_forecasting.R&quot;, chdir = TRUE)</code></pre>
 </div>
 </div>
 <div id="mean" class="section level2">

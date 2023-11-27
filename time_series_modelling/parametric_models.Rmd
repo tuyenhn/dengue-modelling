@@ -32,6 +32,7 @@ library(distributional)
 # Settings
 ```{r}
 theme_set(theme_bw())
+set.seed(123)
 ```
 
 
@@ -172,114 +173,24 @@ guerrero_lambda
 
 # Modelling
 
-## Misc
+## Framework
 
 ### Performance checking 
-
-```{r}
-source("../utils/distributional_eval.R", chdir = TRUE)
-```
 
 ```{r}
 model_perfs <- tibble(
   model = character(),
   RMSE = numeric(),
-  MAE = numeric(),
   CRPS = numeric(),
 )
 
-chunks_forecast_perf <- function(frcst_df, model_name, metrics = c("RMSE", "MAE", "CRPS")) {
-  what <- c(
-    RMSE = quo(sqrt(mean((n - .mean)^2))),
-    MAE = quo(mean(abs(n - .mean))),
-    CRPS = quo(crp_score(dist, n))
-  )
-
-  res_df <- frcst_df %>%
-    group_by(startweek) %>%
-    summarise(
-      data.frame(t(
-        sapply(metrics, function(metric) eval(what[[metric]]))
-      ))
-    )
-
-  mean_df <- res_df %>%
-    summarise(across(all_of(metrics), mean)) %>%
-    mutate(model = model_name, .before = everything())
-
-
-  for (m in metrics) {
-    print(sprintf("Test mean %s: %f", m, mean_df[1, m]))
-  }
-
-  model_perfs <<- model_perfs %>% bind_rows(mean_df)
-
-  res_df
-}
+source("../utils/performance_checking_framework.R", chdir = TRUE)
 ```
 
 ### Forecast framework
 ```{r}
-metrics_plot <- function(frcst_res_df, dates) {
-  frcst_res_df %>%
-    slice(rep(1:n(), each = 4)) %>%
-    mutate(date = dates, .before = everything()) %>%
-    pivot_longer(-c(date, startweek), names_to = "Metric") %>%
-    ggplot() +
-    geom_line(aes(x = date, y = value, color = Metric)) +
-    geom_hline(yintercept = 0, color = "red") +
-    scale_x_yearweek(
-      "Week",
-      breaks = test_weekly_df$date_admitted[seq(0, 52, 3) + 1],
-      labels = as.character(test_weekly_df$date_admitted[seq(0, 52, 3) + 1]) %>% str_extract("W\\d+"),
-      minor_breaks = NULL
-    ) +
-    scale_y_continuous("Metric value")
-}
-
-
-forecast_layer <- function(frcst_df, funnel = TRUE) {
-  frcst_df %<>%
-    group_by(startweek)
-
-  if (funnel) {
-    frcst_df %<>%
-      group_map(\(.x, .y){
-        target_date <- min(.x$date_admitted) - 1
-        target_row <- incidence_weekly_df %>%
-          filter(date_admitted == target_date) %>%
-          mutate(
-            n = n,
-            .mean = n, uppers = n, lowers = n,
-            startweek = .y$startweek
-          )
-
-        .x %>%
-          mutate(startweek = .y$startweek) %>%
-          add_row(
-            target_row,
-            .before = 0
-          )
-      }) %>%
-      list_c() %>%
-      group_by(startweek)
-  }
-
-  lapply(
-    frcst_df %>% group_split(),
-    \(df)
-    c(layer(
-      data = df,
-      geom = "ribbon", stat = "identity", position = "identity",
-      mapping = aes(x = date_admitted, ymin = lowers, ymax = uppers),
-      params = list(alpha = 0.5, fill = "pink")
-    ), layer(
-      data = df,
-      geom = "line", stat = "identity", position = "identity",
-      mapping = aes(x = date_admitted, y = .mean), params = list(color = "red")
-    ))
-  )
-}
+source("../utils/forecast_plotting.R", chdir = TRUE)
+source("../utils/chunks_forecasting.R", chdir = TRUE)
 
 forecast_plot_default <- function(fit_df, actual_df, plot_title) {
   ggplot(actual_df) +
@@ -294,46 +205,9 @@ forecast_plot_default <- function(fit_df, actual_df, plot_title) {
     scale_y_continuous("Incidence") +
     ggtitle(plot_title)
 }
-
-forecast_chunks <- function(
-    train_set, test_set,
-    start_indices,
-    model_fn, formula, ...,
-    horizon = 4, cl = NULL) {
-  if (!missing(cl)) {
-    clusterEvalQ(cl, suppressPackageStartupMessages(library(dplyr)))
-    clusterEvalQ(cl, library(fabletools))
-    clusterExport(cl, c("train_set", "test_set"), environment())
-  }
-  model_fn <- match.fun(model_fn)
-
-  pbapply::pblapply(start_indices, \(start_idx){
-    train_df <- train_set %>%
-      bind_rows(test_set %>% slice_head(n = start_idx)) %>%
-      tail(nrow(train_set))
-
-
-    fit <- train_df %>% model(model = model_fn(!!enquo(formula), ...))
-
-    new_data <- test_set %>%
-      slice_tail(n = 52 - start_idx) %>%
-      head(horizon)
-
-    fit %>%
-      forecast(new_data = new_data) %>%
-      as_tibble() %>%
-      mutate(
-        .model = format(fit$model),
-        startweek = start_idx,
-        uppers = hilo(n)$upper,
-        lowers = hilo(n)$lower
-      )
-  }, cl = cl) %>%
-    list_c()
-}
 ```
 
-### Differencing
+## Time series differencing
 
 Quickly check if any differencing needed, both seasonal and non-seasonal
 
@@ -401,7 +275,10 @@ pre_perf_df <- ar_chunks_fit %>%
   left_join(test_weekly_df, by = "date_admitted")
 
 
-chunks_forecast_res_df <- chunks_forecast_perf(pre_perf_df, "AR(10)")
+chunks_forecast_res_df <- chunks_forecast_perf(
+  pre_perf_df, "AR(10)", c("RMSE", "CRPS"),
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
 
 p2 <- metrics_plot(chunks_forecast_res_df, pre_perf_df$date_admitted)
 
@@ -462,7 +339,10 @@ pre_perf_df <- ma_chunks_fit %>%
   rename(dist = n) %>%
   left_join(test_weekly_df, by = "date_admitted")
 
-chunks_forecast_res_df <- chunks_forecast_perf(pre_perf_df, "MA(6)")
+chunks_forecast_res_df <- chunks_forecast_perf(
+  pre_perf_df, "MA(6)", c("RMSE", "CRPS"),
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
 
 p2 <- metrics_plot(chunks_forecast_res_df, pre_perf_df$date_admitted)
 
@@ -527,8 +407,8 @@ clusterExport(cl, c("train_weekly_weather_df"))
 arimax_models <- parLapply(
   cl = cl,
   c(
-    log(n) ~ xreg(t2m) + PDQ(0, 0, 0), 
-    log(n) ~ xreg(precip) + PDQ(0, 0, 0), 
+    log(n) ~ xreg(t2m) + PDQ(0, 0, 0),
+    log(n) ~ xreg(precip) + PDQ(0, 0, 0),
     log(n) ~ xreg(rh) + PDQ(0, 0, 0)
   ),
   \(formula) train_weekly_weather_df %>% model(ARIMA(formula, stepwise = FALSE))
@@ -590,7 +470,7 @@ arimax_rh_chunks_fit
 ```{r}
 p1_t2m <- forecast_plot_default(
   arimax_t2m_chunks_fit,
-  test_weekly_df ,
+  test_weekly_df,
   "4 week forecast - ARIMA(3,1,3) + mean 2m temperature"
 )
 ggsave("./svgs/forecast_arimax_t2m.svg", width = 10, height = 7)
@@ -598,7 +478,7 @@ p1_t2m
 
 p1_precip <- forecast_plot_default(
   arimax_precip_chunks_fit,
-  test_weekly_df ,
+  test_weekly_df,
   "4 week forecast - ARIMA(3,1,3) + total precipitation"
 )
 ggsave("./svgs/forecast_arimax_precip.svg", width = 10, height = 7)
@@ -606,7 +486,7 @@ p1_precip
 
 p1_rh <- forecast_plot_default(
   arimax_rh_chunks_fit,
-  test_weekly_df ,
+  test_weekly_df,
   "4 week forecast - ARIMA(2,1,4) + mean relative humidity"
 )
 ggsave("./svgs/forecast_arimax_rh.svg", width = 10, height = 7)
@@ -986,7 +866,7 @@ ggsave("./svgs/forecast_prophet_addi.svg", width = 10, height = 7)
 
 p1_prophet_m <- forecast_plot_default(
   prophet_multi_fit,
-  test_weekly_df ,
+  test_weekly_df,
   "4 week forecast - Prophet multiplicative"
 )
 p1_prophet_m
@@ -998,7 +878,7 @@ ggsave("./svgs/forecast_prophet_multi.svg", width = 10, height = 7)
 addi_pre_perf_df <- prophet_addi_fit %>%
   select(date_admitted, n, .mean, startweek) %>%
   rename(dist = n) %>%
-  left_join(test_weekly_df, by = "date_admitted") %>% 
+  left_join(test_weekly_df, by = "date_admitted") %>%
   mutate(dist = dist_normal(mean(dist), sqrt(variance(dist))))
 
 chunks_addi_forecast_res_df <- chunks_forecast_perf(addi_pre_perf_df, "Prophet additive")
@@ -1009,7 +889,7 @@ p1_prophet_a / p2_addi
 multi_pre_perf_df <- prophet_multi_fit %>%
   select(date_admitted, n, .mean, startweek) %>%
   rename(dist = n) %>%
-  left_join(test_weekly_df, by = "date_admitted")%>% 
+  left_join(test_weekly_df, by = "date_admitted") %>%
   mutate(dist = dist_normal(mean(dist), sqrt(variance(dist))))
 
 chunks_multi_forecast_res_df <- chunks_forecast_perf(multi_pre_perf_df, "Prophet multiplicative")
@@ -1073,7 +953,7 @@ ggsave("./svgs/forecast_prophet_weather.svg", width = 10, height = 7)
 prophet_t2m_pre_perf_df <- prophet_t2m_fit %>%
   select(date_admitted, n, .mean, startweek) %>%
   rename(dist = n) %>%
-  left_join(test_weekly_df, by = "date_admitted") %>% 
+  left_join(test_weekly_df, by = "date_admitted") %>%
   mutate(dist = dist_normal(mean(dist), sqrt(variance(dist))))
 
 chunks_t2m_forecast_res_df <- chunks_forecast_perf(prophet_t2m_pre_perf_df, "Prophet multiplicative + mean 2m temperature")
@@ -1083,7 +963,7 @@ p1_t2m / p2_t2m
 prophet_precip_pre_perf_df <- prophet_precip_fit %>%
   select(date_admitted, n, .mean, startweek) %>%
   rename(dist = n) %>%
-  left_join(test_weekly_df, by = "date_admitted") %>% 
+  left_join(test_weekly_df, by = "date_admitted") %>%
   mutate(dist = dist_normal(mean(dist), sqrt(variance(dist))))
 
 chunks_precip_forecast_res_df <- chunks_forecast_perf(prophet_precip_pre_perf_df, "Prophet multiplicative + total precipitation")
@@ -1093,7 +973,7 @@ p1_precip / p2_precip
 prophet_rh_pre_perf_df <- prophet_rh_fit %>%
   select(date_admitted, n, .mean, startweek) %>%
   rename(dist = n) %>%
-  left_join(test_weekly_df, by = "date_admitted") %>% 
+  left_join(test_weekly_df, by = "date_admitted") %>%
   mutate(dist = dist_normal(mean(dist), sqrt(variance(dist))))
 
 chunks_rh_forecast_res_df <- chunks_forecast_perf(prophet_rh_pre_perf_df, "Prophet multiplicative + mean relative humidity")
@@ -1103,7 +983,7 @@ p1_rh / p2_rh
 prophet_weather_pre_perf_df <- prophet_weather_fit %>%
   select(date_admitted, n, .mean, startweek) %>%
   rename(dist = n) %>%
-  left_join(test_weekly_df, by = "date_admitted") %>% 
+  left_join(test_weekly_df, by = "date_admitted") %>%
   mutate(dist = dist_normal(mean(dist), sqrt(variance(dist))))
 
 chunks_weather_forecast_res_df <- chunks_forecast_perf(prophet_weather_pre_perf_df, "Prophet multiplicative + all covariables")
@@ -1171,7 +1051,7 @@ ggsave("./svgs/forecast_prophet_holiday.svg", width = 10, height = 7)
 prophet_holiday_pre_perf_df <- prophet_holiday_fit %>%
   select(date_admitted, n, .mean, startweek) %>%
   rename(dist = n) %>%
-  left_join(test_weekly_df, by = "date_admitted") %>% 
+  left_join(test_weekly_df, by = "date_admitted") %>%
   mutate(dist = dist_normal(mean(dist), sqrt(variance(dist))))
 
 chunks_forecast_res_df <- chunks_forecast_perf(prophet_holiday_pre_perf_df, "Prophet multiplicative + holidays")
