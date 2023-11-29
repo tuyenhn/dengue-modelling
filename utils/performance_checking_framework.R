@@ -1,4 +1,4 @@
-chunks_forecast_perf <- function(frcst_df, model_name, crps_fn = NULL, ..., metrics = c("RMSE", "CRPS")) {
+chunks_forecast_perf <- function(frcst_df, model_name, crps_fn = NULL, ..., metrics = c("RMSE", "CRPS"), log_model_perf = TRUE) {
   # browser()
 
   elips <- enquos(...)
@@ -33,7 +33,9 @@ chunks_forecast_perf <- function(frcst_df, model_name, crps_fn = NULL, ..., metr
     print(sprintf("Test mean %s: %f", m, mean_df[1, m]))
   }
 
-  model_perfs <<- model_perfs %>% bind_rows(mean_df)
+  if (log_model_perf) {
+    model_perfs <<- model_perfs %>% bind_rows(mean_df)
+  }
 
   res_df
 }
