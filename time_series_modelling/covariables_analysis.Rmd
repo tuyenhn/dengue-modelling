@@ -12,6 +12,8 @@ source("../utils/data_weekly.R", chdir = TRUE)
 source("../utils/covar_fns.R", chdir = TRUE)
 source("../utils/regression_recur_miso.R", chdir = TRUE)
 source("../utils/performance_checking_framework.R", chdir = TRUE)
+
+set.seed(123)
 ```
 
 # Weather data
