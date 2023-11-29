@@ -495,8 +495,8 @@ Tuyen Huynh
 <h2>Forecast strategy</h2>
 <p>Performance assessment:</p>
 <ul>
-<li>Root Mean Squared Error (RMSE): calculate RMSE for each 4-week forecast chunks and calculate average RMSE of the whole model.</li>
-<li>Mean Absolute Error (MAE): similar calculations to RMSE.</li>
+<li>Root Mean Squared Error (RMSE): calculate mean RMSE for each 4-week forecast chunks and calculate mean RMSE of the whole model.</li>
+<li>Continuous Ranked Probability Score (CRPS): calculated using the probabilistic forecast instead of the point forecast.</li>
 </ul>
 </section></section>
 <section>
@@ -542,52 +542,44 @@ Tuyen Huynh
 <tr class="header">
 <th style="text-align: left;" data-quarto-table-cell-role="th">model</th>
 <th style="text-align: right;" data-quarto-table-cell-role="th">RMSE</th>
-<th style="text-align: right;" data-quarto-table-cell-role="th">MAE</th>
-<th style="text-align: right;" data-quarto-table-cell-role="th">winkler</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">CRPS</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
 <td style="text-align: left;">MEAN</td>
 <td style="text-align: right;">496.4603</td>
-<td style="text-align: right;">488.6873</td>
-<td style="text-align: right;">18542.235</td>
+<td style="text-align: right;">481.12700</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">Seasonal mean</td>
-<td style="text-align: right;">578.4890</td>
-<td style="text-align: right;">493.7591</td>
+<td style="text-align: right;">563.8767</td>
 <td style="text-align: right;">NA</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">Seasonal mean weighted</td>
-<td style="text-align: right;">526.1371</td>
-<td style="text-align: right;">440.6001</td>
+<td style="text-align: right;">509.3625</td>
 <td style="text-align: right;">NA</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">Seasonal mean exponentially weighted</td>
-<td style="text-align: right;">451.6180</td>
-<td style="text-align: right;">378.1855</td>
+<td style="text-align: right;">362.8018</td>
 <td style="text-align: right;">NA</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">NAIVE</td>
 <td style="text-align: right;">141.1856</td>
-<td style="text-align: right;">125.4559</td>
-<td style="text-align: right;">1760.739</td>
+<td style="text-align: right;">99.18804</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">SNAIVE</td>
 <td style="text-align: right;">402.2951</td>
-<td style="text-align: right;">330.1538</td>
-<td style="text-align: right;">5492.061</td>
+<td style="text-align: right;">NA</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">Drift</td>
 <td style="text-align: right;">141.3862</td>
-<td style="text-align: right;">125.6275</td>
-<td style="text-align: right;">1764.774</td>
+<td style="text-align: right;">99.43200</td>
 </tr>
 </tbody>
 </table>
@@ -691,6 +683,8 @@ Tuyen Huynh
 <img data-src="svgs/forecast_sarima.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;21<strong>.</strong> 4 week forecast - SARIMA(1,0,1)(1,1,0)</p></section>
 <section id="sarimax" class="slide level2 smaller">
 <h2>SARIMAX</h2>
+<div class="columns">
+<div class="column" style="width:50%;">
 <div id="fig-sarimax_t2m" class="quarto-figure quarto-figure-center">
 <figure>
 <p><img data-src="svgs/forecast_sarimax_t2m.svg"></p>
@@ -703,11 +697,20 @@ Tuyen Huynh
 <figcaption>Figure&nbsp;23<strong>.</strong> 4 week forecast - SARIMA(1,0,1)(1,1,0) + total precipitation</figcaption>
 </figure>
 </div>
+</div><div class="column" style="width:50%;">
 <div id="fig-sarimax_rh" class="quarto-figure quarto-figure-center">
 <figure>
 <p><img data-src="svgs/forecast_sarimax_rh.svg"></p>
 <figcaption>Figure&nbsp;24<strong>.</strong> 4 week forecast - SARIMA(1,0,1)(1,1,0) + mean relative humidity</figcaption>
 </figure>
+</div>
+<div id="fig-sarimax_weather" class="quarto-figure quarto-figure-center">
+<figure>
+<p><img data-src="svgs/forecast_sarimax_weather.svg"></p>
+<figcaption>Figure&nbsp;25<strong>.</strong> 4 week forecast - ARIMA(3,1,3) + t2m + tp + rh</figcaption>
+</figure>
+</div>
+</div>
 </div>
 </section>
 <section id="arima-family-models-performances" class="slide level2 smaller">
@@ -719,79 +722,79 @@ Tuyen Huynh
 <tr class="header">
 <th style="text-align: left;" data-quarto-table-cell-role="th">model</th>
 <th style="text-align: right;" data-quarto-table-cell-role="th">RMSE</th>
-<th style="text-align: right;" data-quarto-table-cell-role="th">MAE</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">CRPS</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
 <td style="text-align: left;">AR(10)</td>
-<td style="text-align: right;">157.1333</td>
-<td style="text-align: right;">112.6940</td>
+<td style="text-align: right;">121.9613</td>
+<td style="text-align: right;">86.90873</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">MA(6)</td>
-<td style="text-align: right;">424.7407</td>
-<td style="text-align: right;">350.8512</td>
+<td style="text-align: right;">258.3935</td>
+<td style="text-align: right;">194.37162</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">ARIMA(3,1,3)</td>
-<td style="text-align: right;">159.0385</td>
-<td style="text-align: right;">121.3062</td>
+<td style="text-align: right;">152.4431</td>
+<td style="text-align: right;">99.83687</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">ARIMA(3,1,3) + t2m</td>
-<td style="text-align: right;">147.9500</td>
-<td style="text-align: right;">112.0967</td>
+<td style="text-align: right;">143.0219</td>
+<td style="text-align: right;">95.06217</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">ARIMA(3,1,3) + precip</td>
-<td style="text-align: right;">159.3446</td>
-<td style="text-align: right;">121.4050</td>
+<td style="text-align: right;">150.2848</td>
+<td style="text-align: right;">98.79393</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">ARIMA(2,1,4) + rh</td>
-<td style="text-align: right;">166.2025</td>
-<td style="text-align: right;">126.5876</td>
+<td style="text-align: right;">157.9904</td>
+<td style="text-align: right;">102.34364</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">ARIMA(3,1,3) + t2m + tp</td>
-<td style="text-align: right;">150.3876</td>
-<td style="text-align: right;">114.4176</td>
+<td style="text-align: right;">144.0298</td>
+<td style="text-align: right;">95.55888</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">ARIMA(3,1,3) + t2m + rh</td>
-<td style="text-align: right;">151.7130</td>
-<td style="text-align: right;">116.4763</td>
+<td style="text-align: right;">146.0426</td>
+<td style="text-align: right;">96.14892</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">ARIMA(2,1,4) + tp + rh</td>
-<td style="text-align: right;">165.1708</td>
-<td style="text-align: right;">125.8600</td>
+<td style="text-align: right;">156.2430</td>
+<td style="text-align: right;">101.55478</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">ARIMA(3,1,3) + t2m + tp + rh</td>
-<td style="text-align: right;">152.4056</td>
-<td style="text-align: right;">116.9366</td>
+<td style="text-align: right;">146.1460</td>
+<td style="text-align: right;">96.26296</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">SARIMA(1,0,1)(1,1,0)</td>
-<td style="text-align: right;">143.3745</td>
-<td style="text-align: right;">101.2068</td>
+<td style="text-align: right;">131.7030</td>
+<td style="text-align: right;">88.92623</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">SARIMA(1,1,0)(1,0,2) + t2m</td>
-<td style="text-align: right;">140.0290</td>
-<td style="text-align: right;">103.4316</td>
+<td style="text-align: right;">130.9916</td>
+<td style="text-align: right;">90.90089</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;">SARIMA(1,0,1)(2,1,0) + precip</td>
-<td style="text-align: right;">141.3553</td>
-<td style="text-align: right;">109.2570</td>
+<td style="text-align: left;">SARIMA(1,0,1)(1,1,0) + precip</td>
+<td style="text-align: right;">131.9193</td>
+<td style="text-align: right;">88.37999</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">SARIMA(1,0,1)(1,1,0) + rh</td>
-<td style="text-align: right;">150.5416</td>
-<td style="text-align: right;">106.0509</td>
+<td style="text-align: right;">136.1590</td>
+<td style="text-align: right;">90.97274</td>
 </tr>
 </tbody>
 </table>
@@ -807,14 +810,14 @@ Tuyen Huynh
 <div id="fig-prophet_addi" class="quarto-figure quarto-figure-center">
 <figure>
 <p><img data-src="svgs/forecast_prophet_addi.svg"></p>
-<figcaption>Figure&nbsp;25<strong>.</strong> 4 week forecast - Prophet additive</figcaption>
+<figcaption>Figure&nbsp;26<strong>.</strong> 4 week forecast - Prophet additive</figcaption>
 </figure>
 </div>
 </div><div class="column" style="width:50%;">
 <div id="fig-prophet_multi" class="quarto-figure quarto-figure-center">
 <figure>
 <p><img data-src="svgs/forecast_prophet_multi.svg"></p>
-<figcaption>Figure&nbsp;26<strong>.</strong> 4 week forecast - Prophet multiplicative</figcaption>
+<figcaption>Figure&nbsp;27<strong>.</strong> 4 week forecast - Prophet multiplicative</figcaption>
 </figure>
 </div>
 </div>
@@ -825,30 +828,30 @@ Tuyen Huynh
 <div id="fig-prophet_t2m" class="quarto-figure quarto-figure-center">
 <figure>
 <p><img data-src="svgs/forecast_prophet_t2m.svg"></p>
-<figcaption>Figure&nbsp;27<strong>.</strong> 4 week forecast - Prophet additive + mean 2m temperature temperature</figcaption>
+<figcaption>Figure&nbsp;28<strong>.</strong> 4 week forecast - Prophet additive + mean 2m temperature temperature</figcaption>
 </figure>
 </div>
 <div id="fig-prophet_precip" class="quarto-figure quarto-figure-center">
 <figure>
 <p><img data-src="svgs/forecast_prophet_precip.svg"></p>
-<figcaption>Figure&nbsp;28<strong>.</strong> 4 week forecast - Prophet additive + total precipitation precipitation</figcaption>
+<figcaption>Figure&nbsp;29<strong>.</strong> 4 week forecast - Prophet additive + total precipitation precipitation</figcaption>
 </figure>
 </div>
 <div id="fig-prophet_rh" class="quarto-figure quarto-figure-center">
 <figure>
 <p><img data-src="svgs/forecast_prophet_rh.svg"></p>
-<figcaption>Figure&nbsp;29<strong>.</strong> 4 week forecast - Prophet additive + mean relative humidity humidity</figcaption>
+<figcaption>Figure&nbsp;30<strong>.</strong> 4 week forecast - Prophet additive + mean relative humidity humidity</figcaption>
 </figure>
 </div>
 </section>
 <section id="prophet-with-holidays" class="slide level2">
 <h2>Prophet with holidays</h2>
 
-<img data-src="svgs/weekly_incidence_w_holiday.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;30<strong>.</strong> Incidence time series with holidays</p></section>
+<img data-src="svgs/weekly_incidence_w_holiday.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;31<strong>.</strong> Incidence time series with holidays</p></section>
 <section id="prophet-with-holidays-1" class="slide level2">
 <h2>Prophet with holidays</h2>
 
-<img data-src="svgs/forecast_prophet_holiday.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;31<strong>.</strong> 4 week forecast - Prophet additive + holidays</p></section>
+<img data-src="svgs/forecast_prophet_holiday.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;32<strong>.</strong> 4 week forecast - Prophet additive + holidays</p></section>
 <section id="prophet-models-performances" class="slide level2 smaller">
 <h2>Prophet models’ performances</h2>
 <div class="cell">
@@ -858,39 +861,44 @@ Tuyen Huynh
 <tr class="header">
 <th style="text-align: left;" data-quarto-table-cell-role="th">model</th>
 <th style="text-align: right;" data-quarto-table-cell-role="th">RMSE</th>
-<th style="text-align: right;" data-quarto-table-cell-role="th">MAE</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">CRPS</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
 <td style="text-align: left;">Prophet additive</td>
-<td style="text-align: right;">283.3986</td>
-<td style="text-align: right;">208.8343</td>
+<td style="text-align: right;">240.2656</td>
+<td style="text-align: right;">178.7422</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">Prophet multiplicative</td>
-<td style="text-align: right;">367.4114</td>
-<td style="text-align: right;">276.3912</td>
+<td style="text-align: right;">211.4627</td>
+<td style="text-align: right;">154.4824</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;">Prophet additive + mean 2m temperature</td>
-<td style="text-align: right;">305.6366</td>
-<td style="text-align: right;">220.5760</td>
+<td style="text-align: left;">Prophet multiplicative + mean 2m temperature</td>
+<td style="text-align: right;">210.9408</td>
+<td style="text-align: right;">155.1323</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;">Prophet additive + total precipitation</td>
-<td style="text-align: right;">278.0765</td>
-<td style="text-align: right;">202.6223</td>
+<td style="text-align: left;">Prophet multiplicative + total precipitation</td>
+<td style="text-align: right;">213.2225</td>
+<td style="text-align: right;">155.7937</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;">Prophet additive + mean relative humidity</td>
-<td style="text-align: right;">290.6780</td>
-<td style="text-align: right;">210.1177</td>
+<td style="text-align: left;">Prophet multiplicative + mean relative humidity</td>
+<td style="text-align: right;">209.7889</td>
+<td style="text-align: right;">155.1700</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;">Prophet additive + holiday</td>
-<td style="text-align: right;">286.1246</td>
-<td style="text-align: right;">209.7970</td>
+<td style="text-align: left;">Prophet multiplicative + all covariables</td>
+<td style="text-align: right;">211.9424</td>
+<td style="text-align: right;">156.3973</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Prophet multiplicative + holidays</td>
+<td style="text-align: right;">211.5394</td>
+<td style="text-align: right;">153.0994</td>
 </tr>
 </tbody>
 </table>
@@ -899,26 +907,30 @@ Tuyen Huynh
 </div>
 </div>
 </section>
-<section id="poisson-autoregression" class="slide level2">
-<h2>Poisson autoregression</h2>
+<section id="poisson-regression" class="slide level2">
+<h2>Poisson regression</h2>
 
-<img data-src="svgs/forecast_poisson_l1w.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;32<strong>.</strong> 4 week forecast - Poisson autoregression 1-week lag</p></section>
-<section id="poisson-autoregression---different-auto-lags" class="slide level2">
-<h2>Poisson autoregression - different auto lags</h2>
+<img data-src="svgs/forecast_poisson_l1w.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;33<strong>.</strong> 4 week forecast - Poisson regression 1-week lag</p></section>
+<section id="poisson-regression---different-auto-lags" class="slide level2">
+<h2>Poisson regression - different auto lags</h2>
 
-<img data-src="svgs/forecast_poisson_all_lags.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;33<strong>.</strong> 4 week forecast - Poisson autoregression different auto lags</p></section>
-<section id="poisson-autoregression---temperature-lags" class="slide level2">
-<h2>Poisson autoregression - temperature lags</h2>
+<img data-src="svgs/forecast_poisson_all_lags.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;34<strong>.</strong> 4 week forecast - Poisson regression different auto lags</p></section>
+<section id="poisson-regression---temperature-lags" class="slide level2">
+<h2>Poisson regression - temperature lags</h2>
 
-<img data-src="svgs/forecast_poisson_all_t2m_lags.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;34<strong>.</strong> 4 week forecast - Poisson autoregression 1-week lag, different temperature lags</p></section>
-<section id="poisson-autoregression---precipitation-lags" class="slide level2">
-<h2>Poisson autoregression - precipitation lags</h2>
+<img data-src="svgs/forecast_poisson_all_t2m_lags.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;35<strong>.</strong> 4 week forecast - Poisson regression 1-week lag, different temperature lags</p></section>
+<section id="poisson-regression---precipitation-lags" class="slide level2">
+<h2>Poisson regression - precipitation lags</h2>
 
-<img data-src="svgs/forecast_poisson_all_precip_lags.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;35<strong>.</strong> 4 week forecast - Poisson autoregression 1-week lag, different precipitation lags</p></section>
-<section id="poisson-autoregression---relative-humidity-lags" class="slide level2">
-<h2>Poisson autoregression - relative humidity lags</h2>
+<img data-src="svgs/forecast_poisson_all_precip_lags.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;36<strong>.</strong> 4 week forecast - Poisson regression 1-week lag, different precipitation lags</p></section>
+<section id="poisson-regression---relative-humidity-lags" class="slide level2">
+<h2>Poisson regression - relative humidity lags</h2>
 
-<img data-src="svgs/forecast_poisson_all_rh_lags.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;36<strong>.</strong> 4 week forecast - Poisson autoregression 1-week lag, different relative humidity lags</p><div class="footer footer-default">
+<img data-src="svgs/forecast_poisson_all_rh_lags.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;37<strong>.</strong> 4 week forecast - Poisson regression 1-week lag, different relative humidity lags</p></section>
+<section id="poisson-regression---all-covariables-lagged" class="slide level2">
+<h2>Poisson regression - all covariables lagged</h2>
+
+<img data-src="svgs/forecast_poisson_all_covar_lags.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;38<strong>.</strong> 4 week forecast - Poisson regression 1-week lag, all covariables best lags</p><div class="footer footer-default">
 
 </div>
 </section></section>

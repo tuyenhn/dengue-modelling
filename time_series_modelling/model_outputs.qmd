@@ -216,8 +216,8 @@ Sliding step: 4 weeks
 
 Performance assessment:
 
-- Root Mean Squared Error (RMSE): calculate RMSE for each 4-week forecast chunks and calculate average RMSE of the whole model.
-- Mean Absolute Error (MAE): similar calculations to RMSE.
+- Root Mean Squared Error (RMSE): calculate mean RMSE for each 4-week forecast chunks and calculate mean RMSE of the whole model.
+- Continuous Ranked Probability Score (CRPS): calculated using the probabilistic forecast instead of the point forecast. 
 
 # Non-parametric models
 
@@ -342,13 +342,25 @@ What if all the covariables are combined?
 
 ## SARIMAX {.smaller}
 
+::: columns
+
+::: {.column width="50%"}
 ![4 week forecast - SARIMA(1,1,0)(1,0,2) + mean 2m temperature](svgs/forecast_sarimax_t2m.svg){#fig-sarimax_t2m fig-align="center"}
 
 
 ![4 week forecast - SARIMA(1,0,1)(1,1,0) + total precipitation](svgs/forecast_sarimax_precip.svg){#fig-sarimax_precip fig-align="center"}
 
+:::
+
+::: {.column width="50%"}
 
 ![4 week forecast - SARIMA(1,0,1)(1,1,0) + mean relative humidity](svgs/forecast_sarimax_rh.svg){#fig-sarimax_rh fig-align="center"}
+
+![4 week forecast - ARIMA(3,1,3) + t2m + tp + rh](svgs/forecast_sarimax_weather.svg){#fig-sarimax_weather fig-align="center"}
+
+:::
+
+:::
 
 
 ## ARIMA-family models' performances {.smaller}
@@ -400,23 +412,27 @@ knitr::kable(par_perfs %>% filter(!startsWith(model, "Prophet")), format = "html
 knitr::kable(par_perfs %>% filter(startsWith(model, "Prophet")), format = "html")
 ```
 
-## Poisson autoregression
+## Poisson regression
 
-![4 week forecast - Poisson autoregression 1-week lag](svgs/forecast_poisson_l1w.svg){#fig-poi_auto_1wl fig-align="center"}
+![4 week forecast - Poisson regression 1-week lag](svgs/forecast_poisson_l1w.svg){#fig-poi_auto_1wl fig-align="center"}
 
-## Poisson autoregression - different auto lags
+## Poisson regression - different auto lags
 
-![4 week forecast - Poisson autoregression different auto lags](svgs/forecast_poisson_all_lags.svg){#fig-poi_auto_all fig-align="center"}
+![4 week forecast - Poisson regression different auto lags](svgs/forecast_poisson_all_lags.svg){#fig-poi_auto_all fig-align="center"}
 
-## Poisson autoregression - temperature lags
+## Poisson regression - temperature lags
 
-![4 week forecast - Poisson autoregression 1-week lag, different temperature lags](svgs/forecast_poisson_all_t2m_lags.svg){#fig-poi_t2m_lags fig-align="center"}
+![4 week forecast - Poisson regression 1-week lag, different temperature lags](svgs/forecast_poisson_all_t2m_lags.svg){#fig-poi_t2m_lags fig-align="center"}
 
-## Poisson autoregression - precipitation lags
+## Poisson regression - precipitation lags
 
-![4 week forecast - Poisson autoregression 1-week lag, different precipitation lags](svgs/forecast_poisson_all_precip_lags.svg){#fig-poi_precip_lags fig-align="center"}
+![4 week forecast - Poisson regression 1-week lag, different precipitation lags](svgs/forecast_poisson_all_precip_lags.svg){#fig-poi_precip_lags fig-align="center"}
 
 
-## Poisson autoregression - relative humidity lags
+## Poisson regression - relative humidity lags
 
-![4 week forecast - Poisson autoregression 1-week lag, different relative humidity lags](svgs/forecast_poisson_all_rh_lags.svg){#fig-poi_rh_lags fig-align="center"}
+![4 week forecast - Poisson regression 1-week lag, different relative humidity lags](svgs/forecast_poisson_all_rh_lags.svg){#fig-poi_rh_lags fig-align="center"}
+
+## Poisson regression - all covariables lagged
+
+![4 week forecast - Poisson regression 1-week lag, all covariables best lags](svgs/forecast_poisson_all_covar_lags.svg){#fig-poi_all_covar_lags fig-align="center"}

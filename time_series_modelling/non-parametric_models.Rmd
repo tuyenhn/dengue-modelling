@@ -112,7 +112,7 @@ pre_perf_df <- mean_fit %>%
   left_join(test_weekly_df, by = "date_admitted")
 
 chunks_forecast_res_df <- chunks_forecast_perf(
-  pre_perf_df, "MEAN", c("RMSE", "CRPS"),
+  pre_perf_df, "MEAN",
   crps_fn = scoringRules::crps_pois, variance(dist)
 )
 
@@ -223,7 +223,7 @@ pre_perf_df <- naive_fit %>%
   left_join(test_weekly_df, by = "date_admitted")
 
 chunks_forecast_res_df <- chunks_forecast_perf(
-  pre_perf_df, "NAIVE", c("RMSE", "CRPS"),
+  pre_perf_df, "NAIVE",
   scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
 )
 
@@ -312,7 +312,7 @@ pre_perf_df <- drift_fit %>%
 
 
 chunks_forecast_res_df <- chunks_forecast_perf(
-  pre_perf_df, "Drift", c("RMSE", "CRPS"),
+  pre_perf_df, "Drift",
   scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
 )
 

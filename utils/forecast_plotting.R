@@ -15,6 +15,7 @@ metrics_plot <- function(frcst_res_df, dates) {
 }
 
 forecast_layer <- function(frcst_df, funnel = TRUE) {
+  # TODO: frcst_df schema
   frcst_df %<>%
     group_by(startweek)
 

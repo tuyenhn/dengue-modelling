@@ -1661,7 +1661,7 @@ mean</a></li>
 </ul>
 </div>
 
-<p><strong>Knitted at: 2023-11-27 17:04:01</strong></p>
+<p><strong>Knitted at: 2023-11-28 17:04:05</strong></p>
 <div id="library" class="section level1">
 <h1>Library</h1>
 <pre class="r"><code>library(tidyverse)
@@ -1751,7 +1751,7 @@ p1</code></pre>
   left_join(test_weekly_df, by = &quot;date_admitted&quot;)
 
 chunks_forecast_res_df &lt;- chunks_forecast_perf(
-  pre_perf_df, &quot;MEAN&quot;, c(&quot;RMSE&quot;, &quot;CRPS&quot;),
+  pre_perf_df, &quot;MEAN&quot;,
   crps_fn = scoringRules::crps_pois, variance(dist)
 )</code></pre>
 <pre><code>## [1] &quot;Test mean RMSE: 496.460281&quot;
@@ -1852,7 +1852,7 @@ p1</code></pre>
   left_join(test_weekly_df, by = &quot;date_admitted&quot;)
 
 chunks_forecast_res_df &lt;- chunks_forecast_perf(
-  pre_perf_df, &quot;NAIVE&quot;, c(&quot;RMSE&quot;, &quot;CRPS&quot;),
+  pre_perf_df, &quot;NAIVE&quot;,
   scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
 )</code></pre>
 <pre><code>## [1] &quot;Test mean RMSE: 141.185576&quot;
@@ -1927,7 +1927,7 @@ p1</code></pre>
 
 
 chunks_forecast_res_df &lt;- chunks_forecast_perf(
-  pre_perf_df, &quot;Drift&quot;, c(&quot;RMSE&quot;, &quot;CRPS&quot;),
+  pre_perf_df, &quot;Drift&quot;,
   scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
 )</code></pre>
 <pre><code>## [1] &quot;Test mean RMSE: 141.386224&quot;
