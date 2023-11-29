@@ -185,8 +185,8 @@ unregister_dopar <- function() {
 poi_covar_forecast_df <- recur_miso(
   train_weekly_weather_df, test_weekly_weather_df,
   seq(1, 49, 3),
-  model = list(past_obs = 1),
-  link = "log", distr = "poisson"
+  link = "log", distr = "poisson",
+  xreg_names = c("date_admitted")
 ) %>%
   mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
 
@@ -215,7 +215,6 @@ chunks_forecast_res_df <- chunks_forecast_perf(
 p2 <- metrics_plot(chunks_forecast_res_df, poi_1wl_pre_perf_df$date)
 p1 / p2
 ```
-
 
 ### Auto lagged
 
@@ -279,8 +278,8 @@ ggsave("./svgs/forecast_poisson_all_lags.svg", width = 10, height = 7)
 ```
 
 
-### Weather lagged
- 
+### Covariables lagged
+
 #### T2m 
 
 ```{r}
