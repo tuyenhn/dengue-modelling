@@ -15,11 +15,12 @@ crossref:
 ---
 
 ```{r include=FALSE}
-source("../data_weekly.R", chdir = TRUE)
+source("../utils/data_weekly.R", chdir = TRUE)
 theme_set(theme_bw())
 
 non_par_perfs <- read_csv("simple_models_perf.csv")
 par_perfs <- read_csv("parametric_models_perf.csv")
+glm_perfs <- read_csv("glm_models_perf.csv")
 
 plot_covar <- function(covar_df, scale_y_label, title, extra_layers = list()) {
   covar_name <- names(covar_df)[[2]]
@@ -436,3 +437,14 @@ knitr::kable(par_perfs %>% filter(startsWith(model, "Prophet")), format = "html"
 ## Poisson regression - all covariables lagged
 
 ![4 week forecast - Poisson regression 1-week lag, all covariables best lags](svgs/forecast_poisson_all_covar_lags.svg){#fig-poi_all_covar_lags fig-align="center"}
+
+## Poisson regression - all covariables lagged {.smaller}
+
+Model performance:
+![4 week forecast - Poisson regression 1-week lag, all covariables best lags - model performance](svgs/forecast_poisson_all_covar_lags_perf.svg){#fig-poi_all_covar_lags_perf fig-align="center"}
+
+## Poisson regression models' performances {.smaller}
+
+```{r}
+knitr::kable(glm_perfs, format = "html")
+```

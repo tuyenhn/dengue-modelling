@@ -1,0 +1,225 @@
+# Library
+
+```{r}
+library(sf)
+library(stars)
+library(tscount)
+library(distributional)
+library(parallel)
+library(pbapply)
+
+source("../utils/data_weekly.R", chdir = TRUE)
+source("../utils/covar_fns.R", chdir = TRUE)
+source("../utils/regression_recur_miso.R", chdir = TRUE)
+source("../utils/performance_checking_framework.R", chdir = TRUE)
+```
+
+# Weather data
+
+## Temperature data
+
+```{r}
+plot_covar(hcmc_temp_df, "Temperature (°C)", "Weekly mean 2m temperature - ERA5 reanalysis")
+
+ggsave("./svgs/weekly_t2m_ts.svg", width = 10, height = 7)
+
+hist(hcmc_temp_df$t2m)
+```
+
+## Precipitation data
+
+```{r}
+plot_covar(hcmc_precip_df, "Precipitation (mm)", "Weekly total precipitation ERA5 - reanalysis")
+
+ggsave("./svgs/weekly_precip_ts.svg", width = 10, height = 7)
+
+hist(hcmc_precip_df$precip)
+```
+
+## Humidity data
+
+```{r}
+plot_covar(hcmc_rh_df, "Relative Humidity (%)", "Weekly mean relative humidity - ERA5 reanalysis")
+
+ggsave("./svgs/weekly_rh_ts.svg", width = 10, height = 7)
+
+hist(hcmc_rh_df$rh)
+```
+
+
+```{r}
+incidence_weekly_weather_df
+```
+
+## Specific humidity
+```{r}
+plot_covar(hcmc_sh_df, "Specific Humidity (g/kg)", "Weekly mean specific humidity - ERA5 reanalysis")
+
+ggsave("./svgs/weekly_sh_ts.svg", width = 10, height = 7)
+
+hist(hcmc_sh_df$sh)
+```
+
+## Wind speed
+```{r}
+plot_covar(
+  hcmc_ws_df,
+  "Wind speed intensity at 10 meters (m/s)",
+  "Weekly mean wind speed intensity - ERA5 reanalysis"
+)
+
+ggsave("./svgs/weekly_ws_ts.svg", width = 10, height = 7)
+
+hist(hcmc_ws_df$ws)
+```
+
+## Hydrological balance
+
+Daily hydrological balance (`evaporation - precipitation`) If `hb`>0, the area is accumulates water. If `hb` <0, the area loses water (in m)
+
+```{r}
+plot_covar(
+  hcmc_hb_df,
+  "Hydrological balance",
+  "Weekly total hydrological balance - ERA5 reanalysis",
+  layer(
+    geom = "hline", stat = "identity", position = "identity",
+    params = list(yintercept = 0, color = "red", linetype = "dashed")
+  )
+)
+
+ggsave("./svgs/weekly_hb_ts.svg", width = 10, height = 7)
+
+hist(hcmc_hb_df$hb)
+```
+
+## Solar radiation
+Accumulated solar radiation downwards. This parameter is the amount of solar radiation (also known as shortwave radiation) that reaches a horizontal plane at the surface of the Earth. It is important to highlight that this parameter comprises both direct and diffuse solar radiation. (J/m2)
+
+```{r}
+plot_covar(
+  hcmc_ssdr_df,
+  "Accumulated solar radiation downwards (J/m²)",
+  "Weekly total accumulated solar radiation downwards - ERA5 reanalysis"
+)
+
+ggsave("./svgs/weekly_ssdr_ts.svg", width = 10, height = 7)
+
+hist(hcmc_ssdr_df$ssdr)
+```
+
+## Max and min temperature
+
+```{r}
+plot_covar(
+  hcmc_mx_mn2t24_df %>% pivot_longer(-date) %>% relocate(value, .after = date),
+  "Temperature (°C)",
+  "Weekly mean maximum and minimum temperature - ERA5 reanalysis",
+  list(),
+  color = name
+)
+
+ggsave("./svgs/weekly_mx_mn2t24_ts.svg", width = 10, height = 7)
+
+hist(hcmc_mx_mn2t24_df$mn2t24)
+hist(hcmc_mx_mn2t24_df$mx2t24)
+```
+
+## Max and min relative humidity
+
+```{r}
+plot_covar(
+  hcmc_mx_mnrh24_df %>% pivot_longer(-date) %>% relocate(value, .after = date),
+  "Relative humidity",
+  "Weekly mean maximum and minimum relative humidity - ERA5 reanalysis",
+  list(),
+  color = name
+)
+
+ggsave("./svgs/weekly_mx_mnrh24_ts.svg", width = 10, height = 7)
+
+hist(hcmc_mx_mnrh24_df$mnrh24)
+hist(hcmc_mx_mnrh24_df$mxrh24)
+```
+
+## Max and min specific humidity
+
+```{r}
+plot_covar(
+  hcmc_mx_mnsh24_df %>% pivot_longer(-date) %>% relocate(value, .after = date),
+  "Specific humidity",
+  "Weekly mean maximum and minimum specific humidity - ERA5 reanalysis",
+  scale_alpha_continuous(guide = "none"),
+  color = name, alpha = 0.9
+)
+
+ggsave("./svgs/weekly_mx_mnsh24_ts.svg", width = 10, height = 7)
+
+hist(hcmc_mx_mnsh24_df$mnsh24)
+hist(hcmc_mx_mnsh24_df$mxsh24)
+```
+
+
+# Covariable selection
+
+```{r}
+covar_poi_perf <- function(covar_name) {
+  forecast_df <- recur_miso(
+    train_weekly_weather_df, test_weekly_weather_df,
+    seq(1, 49, 3),
+    model = list(past_obs = 1), xreg_names = c(covar_name),
+    link = "log", distr = "poisson"
+  ) %>%
+    mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
+
+  pre_perf_df <- forecast_df %>%
+    select(date, dist, preds, startweek) %>%
+    left_join(test_weekly_df, by = c("date" = "date_admitted")) %>%
+    rename(.mean = preds)
+
+  chunks_forecast_res_df <- chunks_forecast_perf(
+    pre_perf_df, sprintf("Poisson w/ %s", covar_name),
+    scoringRules::crps_sample, matrix(parameters(dist)$x[[1]], nrow = n()),
+    log_model_perf = FALSE
+  )
+
+  chunks_forecast_res_df %>%
+    summarise(across(c("RMSE", "CRPS"), mean)) %>%
+    mutate(model = sprintf("Poisson w/ %s", covar_name), .before = everything())
+}
+
+covar_names <- incidence_weekly_weather_df %>%
+  as_tibble() %>%
+  select(-c(date_admitted, n)) %>%
+  colnames()
+covar_names
+```
+
+```{r}
+cl <- makeCluster(7)
+invisible(clusterEvalQ(cl, library(tidyverse)))
+invisible(clusterEvalQ(cl, library(magrittr)))
+invisible(clusterEvalQ(cl, library(tscount)))
+invisible(clusterEvalQ(cl, library(tsibble)))
+invisible(clusterEvalQ(cl, library(distributional)))
+clusterExport(
+  cl,
+  c("recur_miso", "train_weekly_weather_df", "test_weekly_weather_df", "test_weekly_df", "chunks_forecast_perf")
+)
+
+poi_covar_perfs <- pblapply(covar_names, covar_poi_perf, cl = cl) %>% list_c()
+
+stopCluster(cl)
+```
+
+```{r}
+poi_covar_perfs
+```
+
+
+```{r}
+poi_covar_perfs %>%
+  ggplot(aes(x = CRPS, y = fct_reorder(model, desc(CRPS)))) +
+  geom_col() +
+  scale_y_discrete("Model")
+```

@@ -36,7 +36,7 @@ set.seed(123)
 # Data ingestion
 
 ```{r}
-source("../data_weekly.R", chdir = TRUE)
+source("../utils/data_weekly.R", chdir = TRUE)
 ```
 
 
@@ -136,7 +136,7 @@ incidence_weekly_weather_df %>%
 model_perfs <- tibble(
   model = character(),
   RMSE = numeric(),
-  CRPS = numeric(),
+  CRPS = numeric()
 )
 
 source("../utils/performance_checking_framework.R", chdir = TRUE)
@@ -178,6 +178,22 @@ unregister_dopar <- function() {
 ```
 
 
+## Parallelization setup
+
+```{r}
+cl <- makeCluster(9)
+invisible(clusterEvalQ(cl, library(tidyverse)))
+invisible(clusterEvalQ(cl, library(magrittr)))
+invisible(clusterEvalQ(cl, library(tscount)))
+invisible(clusterEvalQ(cl, library(tsibble)))
+invisible(clusterEvalQ(cl, library(distributional)))
+clusterExport(cl, c(
+  "%<>%", "incidence_weekly_weather_df", "recur_miso", "test_weekly_df",
+  "chunks_forecast_perf", "model_perfs"
+))
+registerDoParallel(cl)
+```
+
 ## Poisson
 
 ### 1-week lag
@@ -185,8 +201,8 @@ unregister_dopar <- function() {
 poi_covar_forecast_df <- recur_miso(
   train_weekly_weather_df, test_weekly_weather_df,
   seq(1, 49, 3),
-  link = "log", distr = "poisson",
-  xreg_names = c("date_admitted")
+  model = list(past_obs = 1),
+  link = "log", distr = "poisson"
 ) %>%
   mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
 
@@ -198,8 +214,6 @@ p1
 
 ggsave("./svgs/forecast_poisson_l1w.svg", height = 7, width = 10)
 ```
-
-
 
 ```{r}
 poi_1wl_pre_perf_df <- poi_covar_forecast_df %>%
@@ -219,16 +233,6 @@ p1 / p2
 ### Auto lagged
 
 ```{r}
-unregister_dopar()
-
-cl <- makeCluster(9)
-clusterEvalQ(cl, library(tidyverse))
-clusterEvalQ(cl, library(magrittr))
-clusterEvalQ(cl, library(tscount))
-clusterEvalQ(cl, library(tsibble))
-clusterEvalQ(cl, library(distributional))
-registerDoParallel(cl)
-
 auto_lagged_df <- foreach(lag = 1:20) %dopar% {
   forecast_df <- recur_miso(
     train_weekly_weather_df, test_weekly_weather_df,
@@ -252,11 +256,10 @@ auto_lagged_df <- foreach(lag = 1:20) %dopar% {
     model = sprintf("Poisson %d-week lag", lag),
     RMSE = mean(chunks_forecast_res_df$RMSE),
     CRPS = mean(chunks_forecast_res_df$CRPS),
-    lag = lag
+    lag = lag,
+    covar = "auto"
   )
 }
-
-stopCluster(cl)
 ```
 
 ```{r}
@@ -280,225 +283,99 @@ ggsave("./svgs/forecast_poisson_all_lags.svg", width = 10, height = 7)
 
 ### Covariables lagged
 
-#### T2m 
-
+#### Framework
 ```{r}
-unregister_dopar()
+covar_lag_fit <- function(covar_name, lag = 1:20, verbose = TRUE) {
+  # browser()
+  foreach(lag = lag, .verbose = verbose) %dopar% {
+    train_df <- incidence_weekly_weather_df %>%
+      mutate(!!covar_name := lag(!!rlang::sym(covar_name), lag)) %>%
+      filter_index("2000 W01" ~ "2018 W52")
 
-cl <- makeCluster(9)
-clusterEvalQ(cl, library(dplyr))
-clusterEvalQ(cl, library(tsibble))
-clusterEvalQ(cl, library(purrr))
-clusterEvalQ(cl, library(tscount))
-clusterEvalQ(cl, library(distributional))
-clusterExport(cl, c("%<>%"))
-registerDoParallel(cl)
+    test_df <- incidence_weekly_weather_df %>%
+      mutate(!!covar_name := lag(!!rlang::sym(covar_name), lag)) %>%
+      filter_index("2019 W01" ~ "2019 W52")
 
-t2m_lag_df <- foreach(lag = 1:20) %dopar% {
-  train_df <- incidence_weekly_weather_df %>%
-    mutate(t2m = lag(t2m, lag)) %>%
-    filter_index("2000 W01" ~ "2018 W52")
+    forecast_df <- recur_miso(
+      train_df, test_df,
+      seq(1, 49, 3),
+      model = list(past_obs = 1), xreg_names = c(covar_name),
+      link = "log", distr = "poisson"
+    ) %>%
+      mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
 
-  test_df <- incidence_weekly_weather_df %>%
-    mutate(t2m = lag(t2m, lag)) %>%
-    filter_index("2019 W01" ~ "2019 W52")
+    pre_perf_df <- forecast_df %>%
+      select(date, dist, preds, startweek) %>%
+      left_join(test_weekly_df, by = c("date" = "date_admitted")) %>%
+      rename(.mean = preds)
 
-  forecast_df <- recur_miso(
-    train_df, test_df,
-    seq(1, 49, 3),
-    model = list(past_obs = 1), xreg_names = c("t2m"),
-    link = "log", distr = "poisson"
-  ) %>%
-    mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
+    chunks_forecast_res_df <- chunks_forecast_perf(
+      pre_perf_df, sprintf("Poisson %d-week %s lag", lag, covar_name),
+      scoringRules::crps_sample, matrix(parameters(dist)$x[[1]], nrow = n())
+    )
 
-  pre_perf_df <- forecast_df %>%
-    select(date, dist, preds, startweek) %>%
-    left_join(test_weekly_df, by = c("date" = "date_admitted")) %>%
-    rename(.mean = preds)
-
-  chunks_forecast_res_df <- chunks_forecast_perf(
-    pre_perf_df, sprintf("Poisson %d-week t2m lag", lag),
-    scoringRules::crps_sample, matrix(parameters(dist)$x[[1]], nrow = n())
-  )
-
-  tibble(
-    model = sprintf("Poisson %d-week t2m lag", lag),
-    RMSE = mean(chunks_forecast_res_df$RMSE),
-    CRPS = mean(chunks_forecast_res_df$CRPS),
-    lag = lag
-  )
+    tibble(
+      model = sprintf("Poisson %d-week %s lag", lag, covar_name),
+      RMSE = mean(chunks_forecast_res_df$RMSE),
+      CRPS = mean(chunks_forecast_res_df$CRPS),
+      lag = lag,
+      covar = covar_name
+    )
+  }
 }
-
-stopCluster(cl)
 ```
 
 ```{r}
-lowest_t2m_lag <- t2m_lag_df %>%
-  list_c() %>%
-  filter(CRPS == min(CRPS))
+best_lag_plot <- function(lag_df) {
+  lag_df <- lag_df %>% list_c()
+  lowest_lag <- lag_df %>%
+    filter(CRPS == min(CRPS))
 
-t2m_lag_df %>%
-  list_c() %>%
-  ggplot(aes(x = lag, y = CRPS)) +
-  geom_col() +
-  geom_point(data = lowest_t2m_lag, shape = 4, color = "red", size = 2, stroke = 1.5)
-
-model_perfs %<>%
-  bind_rows(lowest_t2m_lag)
-
-ggsave("./svgs/forecast_poisson_all_t2m_lags.svg", width = 10, height = 7)
-```
-
-#### Precipitation
-
-```{r}
-unregister_dopar()
-
-cl <- makeCluster(9)
-clusterEvalQ(cl, library(dplyr))
-clusterEvalQ(cl, library(tsibble))
-clusterEvalQ(cl, library(purrr))
-clusterEvalQ(cl, library(tscount))
-clusterEvalQ(cl, library(distributional))
-clusterExport(cl, c("%<>%"))
-registerDoParallel(cl)
-
-precip_lag_df <- foreach(lag = 1:20) %dopar% {
-  train_df <- incidence_weekly_weather_df %>%
-    mutate(precip = lag(precip, lag)) %>%
-    filter_index("2000 W01" ~ "2018 W52")
-
-  test_df <- incidence_weekly_weather_df %>%
-    mutate(precip = lag(precip, lag)) %>%
-    filter_index("2019 W01" ~ "2019 W52")
-
-  forecast_df <- recur_miso(
-    train_df, test_df,
-    seq(1, 49, 3),
-    model = list(past_obs = 1), xreg_names = c("precip"),
-    link = "log", distr = "poisson"
-  ) %>%
-    mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
-
-  pre_perf_df <- forecast_df %>%
-    select(date, dist, preds, startweek) %>%
-    left_join(test_weekly_df, by = c("date" = "date_admitted")) %>%
-    rename(.mean = preds)
-
-  chunks_forecast_res_df <- chunks_forecast_perf(
-    pre_perf_df, sprintf("Poisson %d-week precip lag", lag),
-    scoringRules::crps_sample, matrix(parameters(dist)$x[[1]], nrow = n())
+  print(
+    lag_df %>%
+      ggplot(aes(x = lag, y = CRPS)) +
+      geom_col() +
+      geom_point(data = lowest_lag, shape = 4, color = "red", size = 2, stroke = 1.5) +
+      ggtitle(sprintf("Poisson regression with %s as covariable, 20-week lags", lowest_lag$covar))
   )
 
-  tibble(
-    model = sprintf("Poisson %d-week precip lag", lag),
-    RMSE = mean(chunks_forecast_res_df$RMSE),
-    CRPS = mean(chunks_forecast_res_df$CRPS),
-    lag = lag
-  )
+  model_perfs <<- model_perfs %>% bind_rows(lowest_lag)
+
+  lag_df
 }
+```
 
-stopCluster(cl)
+#### Fitting
+
+```{r}
+covar_names <- incidence_weekly_weather_df %>%
+  as_tibble() %>%
+  select(-c(date_admitted, n, ssdr, mx2t24)) %>%
+  colnames()
+
+all_covars_lagged <- pblapply(covar_names, \(covar) {
+  lag_df <- covar_lag_fit(covar, verbose = FALSE)
+  best_lag_plot(lag_df)
+}) %>% list_c()
 ```
 
 ```{r}
-lowest_precip_lag <- precip_lag_df %>%
-  list_c() %>%
-  filter(CRPS == min(CRPS))
+best_lags <- all_covars_lagged %>%
+  group_by(covar) %>%
+  slice_min(CRPS) %>%
+  select(covar, lag) %>%
+  deframe() %>%
+  as.list()
 
-precip_lag_df %>%
-  list_c() %>%
-  ggplot(aes(x = lag, y = CRPS)) +
-  geom_col() +
-  geom_point(data = lowest_precip_lag, shape = 4, color = "red", size = 2, stroke = 1.5)
-
-model_perfs %<>%
-  bind_rows(lowest_precip_lag)
-
-ggsave("./svgs/forecast_poisson_all_precip_lags.svg", width = 10, height = 7)
+best_lags
 ```
-
-
-#### Relative humidity
-
-```{r}
-unregister_dopar()
-
-cl <- makeCluster(9)
-clusterEvalQ(cl, library(dplyr))
-clusterEvalQ(cl, library(tsibble))
-clusterEvalQ(cl, library(purrr))
-clusterEvalQ(cl, library(tscount))
-clusterEvalQ(cl, library(distributional))
-clusterExport(cl, c("%<>%"))
-registerDoParallel(cl)
-
-rh_lag_df <- foreach(lag = 1:20) %dopar% {
-  train_df <- incidence_weekly_weather_df %>%
-    mutate(rh = lag(rh, lag)) %>%
-    filter_index("2000 W01" ~ "2018 W52")
-
-  test_df <- incidence_weekly_weather_df %>%
-    mutate(rh = lag(rh, lag)) %>%
-    filter_index("2019 W01" ~ "2019 W52")
-
-
-  forecast_df <- recur_miso(
-    train_df, test_df,
-    seq(1, 49, 3),
-    model = list(past_obs = 1), xreg_names = c("rh"),
-    link = "log", distr = "poisson"
-  ) %>%
-    mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
-
-  pre_perf_df <- forecast_df %>%
-    select(date, dist, preds, startweek) %>%
-    left_join(test_weekly_df, by = c("date" = "date_admitted")) %>%
-    rename(.mean = preds)
-
-  chunks_forecast_res_df <- chunks_forecast_perf(
-    pre_perf_df, sprintf("Poisson %d-week rh lag", lag),
-    scoringRules::crps_sample, matrix(parameters(dist)$x[[1]], nrow = n())
-  )
-
-  tibble(
-    model = sprintf("Poisson %d-week rh lag", lag),
-    RMSE = mean(chunks_forecast_res_df$RMSE),
-    CRPS = mean(chunks_forecast_res_df$CRPS),
-    lag = lag
-  )
-}
-
-stopCluster(cl)
-```
-
-```{r}
-lowest_rh_lag <- rh_lag_df %>%
-  list_c() %>%
-  filter(CRPS == min(CRPS))
-
-rh_lag_df %>%
-  list_c() %>%
-  ggplot(aes(x = lag, y = CRPS)) +
-  geom_col() +
-  geom_point(data = lowest_rh_lag, shape = 4, color = "red", size = 2, stroke = 1.5)
-
-model_perfs %<>%
-  bind_rows(lowest_rh_lag)
-
-ggsave("./svgs/forecast_poisson_all_rh_lags.svg", width = 10, height = 7)
-```
-
 
 ### All covariables lagged
 
 ```{r}
-covar_lagged_df <- incidence_weekly_weather_df %>%
-  mutate(
-    t2m = lag(t2m, 14),
-    precip = lag(precip, 3),
-    rh = lag(rh, 3)
-  )
+covar_lagged_df <- incidence_weekly_weather_df %>% mutate(
+  across(all_of(covar_names), ~ lag(.x, n = best_lags[[cur_column()]]))
+)
 
 train_df <- covar_lagged_df %>%
   filter_index("2000 W01" ~ "2018 W52")
@@ -510,7 +387,7 @@ test_df <- covar_lagged_df %>%
 poi_covar_forecast_df <- recur_miso(
   train_df, test_df,
   seq(1, 49, 3),
-  model = list(past_obs = 1), xreg_names = c("t2m", "precip", "rh"),
+  model = list(past_obs = 1), xreg_names = covar_names,
   link = "log", distr = "poisson"
 ) %>%
   mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
@@ -537,9 +414,13 @@ chunks_forecast_res_df <- chunks_forecast_perf(
 
 p2 <- metrics_plot(chunks_forecast_res_df, poi_covars_pre_perf_df$date)
 p1 / p2
+
+ggsave("./svgs/forecast_poisson_all_covar_lags_perf.svg", width = 10, height = 7)
 ```
 
 ## Negative Binomial
+
+### 1-week lag
 
 ```{r}
 nb_covar_forecast_df <- recur_miso(
@@ -550,22 +431,34 @@ nb_covar_forecast_df <- recur_miso(
 ) %>%
   mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
 
-forecast_plot_default(
+p1 <- forecast_plot_default(
   nb_covar_forecast_df, test_weekly_df,
   "4 week forecast - Negative Binomial regression 1-week lag"
 )
+p1
 
 ggsave("./svgs/forecast_nb_l1w.svg", height = 7, width = 10)
 ```
 
 ```{r}
 nb_1wl_pre_perf_df <- nb_covar_forecast_df %>%
-  select(date, preds, startweek) %>%
-  left_join(test_weekly_df, by = c("date" = "date_admitted"))
+  select(date, dist, preds, startweek) %>%
+  left_join(test_weekly_df, by = c("date" = "date_admitted")) %>%
+  rename(.mean = preds)
 
-chunks_forecast_perf(
-  nb_1wl_pre_perf_df, "NB 1-week lag"
+chunks_forecast_res_df <- chunks_forecast_perf(
+  nb_1wl_pre_perf_df, "NB 1-week lag",
+  scoringRules::crps_sample, matrix(parameters(dist)$x[[1]], nrow = n())
 )
+
+p2 <- metrics_plot(chunks_forecast_res_df, nb_1wl_pre_perf_df$date)
+p1 / p2
+```
+
+# Parallelization teardown
+```{r}
+unregister_dopar()
+stopCluster(cl)
 ```
 
 # Comparison

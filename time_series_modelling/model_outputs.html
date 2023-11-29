@@ -930,7 +930,74 @@ Tuyen Huynh
 <section id="poisson-regression---all-covariables-lagged" class="slide level2">
 <h2>Poisson regression - all covariables lagged</h2>
 
-<img data-src="svgs/forecast_poisson_all_covar_lags.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;38<strong>.</strong> 4 week forecast - Poisson regression 1-week lag, all covariables best lags</p><div class="footer footer-default">
+<img data-src="svgs/forecast_poisson_all_covar_lags.svg" class="r-stretch quarto-figure-center"><p class="caption">Figure&nbsp;38<strong>.</strong> 4 week forecast - Poisson regression 1-week lag, all covariables best lags</p></section>
+<section id="poisson-regression---all-covariables-lagged-1" class="slide level2 smaller">
+<h2>Poisson regression - all covariables lagged</h2>
+<p>Model performance: <img data-src="svgs/forecast_poisson_all_covar_lags_perf.svg" id="fig-poi_all_covar_lags_perf" data-fig-align="center" alt="4 week forecast - Poisson regression 1-week lag, all covariables best lags - model performance"></p>
+</section>
+<section id="poisson-regression-models-performances" class="slide level2 smaller">
+<h2>Poisson regression models’ performances</h2>
+<div class="cell">
+<div class="cell-output-display">
+<table data-quarto-postprocess="true">
+<thead>
+<tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">model</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">RMSE</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">CRPS</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">lag</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Poisson 1-week lag</td>
+<td style="text-align: right;">113.10423</td>
+<td style="text-align: right;">85.33036</td>
+<td style="text-align: right;">NA</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson 1-week lag</td>
+<td style="text-align: right;">113.10423</td>
+<td style="text-align: right;">85.20859</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Poisson 14-week t2m lag</td>
+<td style="text-align: right;">106.98167</td>
+<td style="text-align: right;">79.88691</td>
+<td style="text-align: right;">14</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson 3-week precip lag</td>
+<td style="text-align: right;">95.86820</td>
+<td style="text-align: right;">75.83804</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Poisson 3-week rh lag</td>
+<td style="text-align: right;">101.77712</td>
+<td style="text-align: right;">75.53619</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Poisson all covariables lagged</td>
+<td style="text-align: right;">83.79564</td>
+<td style="text-align: right;">69.12421</td>
+<td style="text-align: right;">NA</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">NB 1-week lag</td>
+<td style="text-align: right;">113.10423</td>
+<td style="text-align: right;">75.74035</td>
+<td style="text-align: right;">NA</td>
+</tr>
+</tbody>
+</table>
+
+
+</div>
+</div>
+<div class="footer footer-default">
 
 </div>
 </section></section>
