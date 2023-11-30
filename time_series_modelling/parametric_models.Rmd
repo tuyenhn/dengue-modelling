@@ -231,6 +231,13 @@ train_weekly_df %>%
     lag = 208
   )
 ```
+```{r}
+local_get_coef <- \(fit) fit %>%
+  coef() %>%
+  select(c(term, estimate)) %>%
+  deframe() %>%
+  as.list()
+```
 
 
 ## AR
@@ -242,12 +249,7 @@ report(ar_fit)
 
 cat("\n\n")
 
-coefs <- ar_fit %>%
-  coef() %>%
-  slice(-1) %>%
-  select(c(term, estimate)) %>%
-  deframe() %>%
-  as.list()
+coefs <- local_get_coef(ar_fit) %>% tail(-1)
 coefs
 ```
 
@@ -304,12 +306,7 @@ report(ma_fit)
 
 cat("\n\n")
 
-coefs <- ma_fit %>%
-  coef() %>%
-  slice(1:6) %>%
-  select(c(term, estimate)) %>%
-  deframe() %>%
-  as.list()
+coefs <- local_get_coef(ma_fit) %>% head(-1)
 coefs
 ```
 
@@ -355,11 +352,7 @@ p1 / p2
 arima_fit <- train_weekly_df %>% model(ARIMA(log(n) ~ PDQ(0, 0, 0), stepwise = FALSE))
 report(arima_fit)
 
-coefs <- arima_fit %>%
-  coef() %>%
-  select(c(term, estimate)) %>%
-  deframe() %>%
-  as.list()
+coefs <- local_get_coef(arima_fit)
 coefs
 ```
 
@@ -417,12 +410,6 @@ arimax_models <- parLapply(
 )
 
 stopCluster(cl)
-
-local_get_coef <- \(fit) fit %>%
-  coef() %>%
-  select(c(term, estimate)) %>%
-  deframe() %>%
-  as.list()
 
 arimax_t2m_fit <- arimax_models[[1]]
 report(arimax_t2m_fit)
@@ -784,7 +771,8 @@ sarimax_models <- parLapply(
   c(
     log(n) ~ xreg(t2m), 
     log(n) ~ xreg(precip), 
-    log(n) ~ xreg(rh)
+    log(n) ~ xreg(rh),
+    log(n) ~ xreg(t2m, precip, rh)
   ),
   \(formula) train_weekly_weather_df %>% model(ARIMA(formula, stepwise = FALSE))
 )
@@ -810,6 +798,11 @@ sarimax_rh_fit <- sarimax_models[[3]]
 report(sarimax_rh_fit)
 sarimax_rh_coefs <- local_get_coef(sarimax_rh_fit) %>% head(-1)
 # sarimax_rh_coefs
+
+sarimax_weather_fit <- sarimax_models[[4]]
+report(sarimax_weather_fit)
+sarimax_weather_coefs <- local_get_coef(sarimax_weather_fit)
+# sarimax_weather_coefs
 ```
 
 ### Chunks
@@ -829,14 +822,20 @@ fn3 <- function() {
     train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3), ARIMA, log(n) ~ xreg(rh, fixed = sarimax_rh_coefs[4]) + pdq(1, 0, 1, fixed = sarimax_rh_coefs[1:2]) + PDQ(1, 1, 0, fixed = sarimax_rh_coefs[3])
   )}
 
-expr_v <- c(substitute(fn1()), substitute(fn2()), substitute(fn3()))
+fn4 <- function() {
+  forecast_chunks(
+    train_weekly_weather_df, test_weekly_weather_df, seq(0, 49, 3), ARIMA, log(n) ~ xreg(t2m, precip, rh, fixed = sarimax_weather_coefs[7:9]) + pdq(0, 1, 5, fixed = sarimax_weather_coefs[1:5]) + PDQ(1, 0, 0, fixed = sarimax_weather_coefs[6])
+  )}
+
+expr_v <- c(substitute(fn1()), substitute(fn2()), substitute(fn3()), substitute(fn4()))
 fits <- mclapply(expr_v, eval, mc.cores = 3)
-setNames(fits, c("sarimax_t2m_chunks_fit", "sarimax_precip_chunks_fit", "sarimax_rh_chunks_fit")) %>% 
+setNames(fits, c("sarimax_t2m_chunks_fit", "sarimax_precip_chunks_fit", "sarimax_rh_chunks_fit", "sarimax_weather_chunks_fit")) %>% 
   list2env(envir = .GlobalEnv)
 
 sarimax_t2m_chunks_fit
 sarimax_precip_chunks_fit
 sarimax_rh_chunks_fit
+sarimax_weather_chunks_fit
 ```
 
 
@@ -864,6 +863,15 @@ p1_rh <- forecast_plot_default(
 )
 p1_rh
 ggsave("./svgs/forecast_sarimax_rh.svg", width = 10, height = 7)
+
+p1_weather <- forecast_plot_default(
+  sarimax_weather_chunks_fit,
+  test_weekly_df,
+  "4 week forecast - SARIMA(0,1,5)(1,0,0) + t2m + tp + rh"
+)
+p1_weather
+ggsave("./svgs/forecast_sarimax_weather.svg", width = 10, height = 7)
+
 ```
 
 ```{r}
@@ -902,6 +910,19 @@ chunks_rh_forecast_res_df <- chunks_forecast_perf(
 )
 p2_rh <- metrics_plot(chunks_rh_forecast_res_df, rh_pre_perf_df$date_admitted)
 p1_rh / p2_rh
+
+weather_pre_perf_df <- sarimax_weather_chunks_fit %>%
+  select(date_admitted, n, .mean, startweek) %>%
+  rename(dist = n) %>%
+  left_join(test_weekly_df, by = "date_admitted")
+
+chunks_weather_forecast_res_df <- chunks_forecast_perf(
+  weather_pre_perf_df, "SARIMA(0,1,5)(1,0,0) + weather",
+  scoringRules::crps_norm, mean(dist), sqrt(variance(dist))
+)
+p2_weather <- metrics_plot(chunks_weather_forecast_res_df, weather_pre_perf_df$date_admitted)
+p1_weather / p2_weather
+
 ```
 
 
