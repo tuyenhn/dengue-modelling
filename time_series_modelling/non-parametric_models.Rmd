@@ -36,7 +36,7 @@ set.seed(123)
 
 ```{r}
 # setwd("time_series_modelling")
-source("../data_weekly.R", chdir = TRUE)
+source("../utils/data_weekly.R", chdir = TRUE)
 ```
 
 
