@@ -4,14 +4,14 @@ forecast_chunks <- function(
     model_fn, formula, ...,
     horizon = 4, cl = NULL) {
   if (!missing(cl)) {
-    clusterEvalQ(cl, suppressPackageStartupMessages(library(dplyr)))
-    clusterEvalQ(cl, library(fabletools))
+    invisible(clusterEvalQ(cl, library(dplyr)))
+    invisible(clusterEvalQ(cl, library(fabletools)))
     clusterExport(cl, c("train_set", "test_set"), environment())
   }
   model_fn <- match.fun(model_fn)
-  
+
   # browser()
-  
+
   pbapply::pblapply(start_indices, \(start_idx){
     train_df <- train_set %>%
       bind_rows(test_set %>% slice_head(n = start_idx)) %>%

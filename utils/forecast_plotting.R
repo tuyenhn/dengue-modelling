@@ -29,10 +29,7 @@ forecast_layer <- function(frcst_df, funnel = TRUE) {
 
         .x %>%
           mutate(startweek = .y$startweek) %>%
-          add_row(
-            target_row,
-            .before = 0
-          )
+          add_row(target_row, .before = 0)
       }) %>%
       list_c() %>%
       group_by(startweek)
