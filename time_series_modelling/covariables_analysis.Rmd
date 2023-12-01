@@ -7,6 +7,7 @@ library(tscount)
 library(distributional)
 library(parallel)
 library(pbapply)
+library(GGally)
 
 source("../utils/data_weekly.R", chdir = TRUE)
 source("../utils/covar_fns.R", chdir = TRUE)
@@ -162,7 +163,7 @@ hist(hcmc_mx_mnsh24_df$mxsh24)
 ```
 
 
-# Covariable selection
+# Covariable individual performance
 
 ```{r}
 covar_poi_perf <- function(covar_name) {
@@ -242,5 +243,31 @@ incidence_weekly_weather_df %>%
 incidence_weekly_weather_df %>%
   drop_na() %>%
   mutate(n = log(n)) %>%
-  GGally::ggpairs(columns = 2:15, progress = FALSE)
+  ggpairs(
+    columns = 2:15,
+    lower = list(continuous = wrap("density", alpha = 0.5)),
+    progress = FALSE
+  )
+```
+
+```{r fig.height=10, fig.width=10}
+incidence_weekly_weather_df %>%
+  drop_na() %>%
+  mutate(n = log(n)) %>%
+  ggpairs(
+    columns = 2:15,
+    lower = list(continuous = wrap("points", alpha = 0.1)),
+    progress = FALSE
+  )
+```
+
+```{r fig.height=10, fig.width=10}
+incidence_weekly_weather_df %>%
+  drop_na() %>%
+  mutate(n = log(n)) %>%
+  ggpairs(
+    columns = 2:15,
+    lower = list(continuous = wrap(ggally_smooth_lm, color = "red")),
+    progress = FALSE
+  )
 ```
