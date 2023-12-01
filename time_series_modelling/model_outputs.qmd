@@ -386,7 +386,10 @@ knitr::kable(par_perfs %>% filter(!startsWith(model, "Prophet")), format = "html
 knitr::kable(par_perfs %>% filter(startsWith(model, "Prophet")), format = "html")
 ```
 
-## Poisson regression
+## Simple regression models
+
+
+# Poisson regression
 
 ![4 week forecast - Poisson regression 1-week lag](svgs/forecast_poisson_l1w.svg){#fig-poi_auto_1wl fig-align="center"}
 
