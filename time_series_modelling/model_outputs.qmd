@@ -99,7 +99,7 @@ incidence_weekly_df %>%
     -   **Test set**: 2019
 -   Temporal resolution: Daily
 -   Spatial coverage: Ho Chi Minh City\*
--   Covariable analyses <a href="covariables_analysis.html">here</a>
+-   Covariable analyses <a href="covariables_analysis.html" target="_blank">here</a>
 
 *\* cropped by Ho Chi Minh City 10km buffer bounding box and then spatially aggregated in R*
 
