@@ -218,10 +218,29 @@ stopCluster(cl)
 poi_covar_perfs
 ```
 
-
 ```{r}
 poi_covar_perfs %>%
   ggplot(aes(x = CRPS, y = fct_reorder(model, desc(CRPS)))) +
   geom_col() +
   scale_y_discrete("Model")
+```
+
+# Relationship with incidence
+
+```{r fig.height=7, fig.width=10}
+incidence_weekly_weather_df %>%
+  drop_na() %>%
+  pivot_longer(-c(date_admitted, n)) %>%
+  ggplot(aes(x = value, y = log(n))) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE) +
+  facet_wrap(~name, scales = "free_x")
+```
+
+```{r fig.height=10, fig.width=10}
+# Pearson correlation coefficient
+incidence_weekly_weather_df %>%
+  drop_na() %>%
+  mutate(n = log(n)) %>%
+  GGally::ggpairs(columns = 2:15, progress = FALSE)
 ```
