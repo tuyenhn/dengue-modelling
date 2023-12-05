@@ -87,11 +87,11 @@ source("../utils/performance_checking_framework.R", chdir = TRUE)
 source("../utils/forecast_plotting.R", chdir = TRUE)
 source("../utils/chunks_forecasting.R", chdir = TRUE)
 
-forecast_plot_default <- function(fit_df, actual_df, plot_title) {
+forecast_plot_default <- function(fit_df, actual_df, plot_title, funnel = TRUE) {
   fit_df %<>% rename(date_admitted = date, .mean = preds, n = dist)
   ggplot(actual_df) +
     geom_line(aes(x = date_admitted, y = n)) +
-    forecast_layer(fit_df) +
+    forecast_layer(fit_df, funnel = funnel) +
     scale_x_yearweek(
       "Week",
       breaks = actual_df$date_admitted[seq(0, 52, 3) + 1],
@@ -135,6 +135,7 @@ registerDoParallel(cl)
 ## Poisson
 
 ### 1-week lag
+Just the intercept
 ```{r}
 poi_covar_forecast_df <- recur_miso(
   train_weekly_weather_df, test_weekly_weather_df,
@@ -146,11 +147,12 @@ poi_covar_forecast_df <- recur_miso(
 
 p1 <- forecast_plot_default(
   poi_covar_forecast_df, test_weekly_df,
-  "4 week forecast - Poisson regression 1-week lag"
+  "4 week forecast - Poisson regression 1-week lag",
+  funnel = FALSE
 )
 p1
 
-ggsave("./svgs/forecast_poisson_l1w.svg", height = 7, width = 10)
+ggsave("../time_series_modelling/svgs/forecast_poisson_l1w.svg", height = 7, width = 10)
 ```
 
 ```{r}
@@ -171,7 +173,7 @@ p1 / p2
 ### Auto lagged
 
 ```{r}
-auto_lagged_df <- foreach(lag = 1:20) %dopar% {
+auto_lagged_df <- foreach(lag = 0:20) %dopar% {
   forecast_df <- recur_miso(
     train_weekly_weather_df, test_weekly_weather_df,
     seq(1, 49, 3),
@@ -210,12 +212,13 @@ auto_lagged_df %>%
   ggplot(aes(x = lag, y = CRPS)) +
   geom_col() +
   # geom_col(aes(x = lag, y = -RMSE)) +
-  geom_point(data = lowest_auto_lag, shape = 4, color = "red", size = 2, stroke = 1.5)
+  geom_point(data = lowest_auto_lag, shape = 4, color = "red", size = 2, stroke = 1.5) +
+  ggtitle("Poisson regression with auto-lagged weeks")
 
 model_perfs %<>%
   bind_rows(lowest_auto_lag)
 
-ggsave("./svgs/forecast_poisson_all_lags.svg", width = 10, height = 7)
+ggsave("../time_series_modelling/svgs/forecast_poisson_all_lags.svg", width = 10, height = 7)
 ```
 
 
@@ -223,9 +226,9 @@ ggsave("./svgs/forecast_poisson_all_lags.svg", width = 10, height = 7)
 
 #### Framework
 ```{r}
-covar_lag_fit <- function(covar_name, lag = 1:20, verbose = TRUE) {
+covar_lag_fit <- function(covar_name, lags = 1:20, verbose = TRUE) {
   # browser()
-  foreach(lag = lag, .verbose = verbose) %dopar% {
+  parLapply(cl, lags, \(lag){
     train_df <- incidence_weekly_weather_df %>%
       mutate(!!covar_name := lag(!!rlang::sym(covar_name), lag)) %>%
       filter_index("2000 W01" ~ "2018 W52")
@@ -259,7 +262,7 @@ covar_lag_fit <- function(covar_name, lag = 1:20, verbose = TRUE) {
       lag = lag,
       covar = covar_name
     )
-  }
+  })
 }
 ```
 
@@ -336,7 +339,7 @@ p1 <- forecast_plot_default(
 )
 p1
 
-ggsave("./svgs/forecast_poisson_all_covar_lags.svg", width = 10, height = 7)
+ggsave("../time_series_modelling/svgs/forecast_poisson_all_covar_lags.svg", width = 10, height = 7)
 ```
 
 ```{r}
@@ -353,7 +356,7 @@ chunks_forecast_res_df <- chunks_forecast_perf(
 p2 <- metrics_plot(chunks_forecast_res_df, poi_covars_pre_perf_df$date)
 p1 / p2
 
-ggsave("./svgs/forecast_poisson_all_covar_lags_perf.svg", width = 10, height = 7)
+ggsave("../time_series_modelling/svgs/forecast_poisson_all_covar_lags_perf.svg", width = 10, height = 7)
 ```
 
 ## Negative Binomial
@@ -375,7 +378,7 @@ p1 <- forecast_plot_default(
 )
 p1
 
-ggsave("./svgs/forecast_nb_l1w.svg", height = 7, width = 10)
+ggsave("../time_series_modelling/svgs/forecast_nb_l1w.svg", height = 7, width = 10)
 ```
 
 ```{r}

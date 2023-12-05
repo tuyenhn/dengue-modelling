@@ -28,8 +28,11 @@ recur_miso <- function(
           as_tibble() %>%
           select(all_of(xreg_names)) %>%
           as.matrix()
+
+        browser()
+
         newxreg <- test_set %>%
-          tail(52 - start_idx) %>%
+          tail(52 - start_idx + 1) %>%
           head(horizon) %>%
           as_tibble() %>%
           select(all_of(xreg_names)) %>%
@@ -37,24 +40,64 @@ recur_miso <- function(
       }
 
       fit <- tsglm(train_df$n, model = model, link = link, distr = distr, xreg = xreg)
-      # `newobs = NULL` to force to recursively use 1-step-ahead predictions
-      pred <- predict(fit, n.ahead = horizon, newobs = NULL, newxreg = newxreg)
 
-      forecast_df <- tibble(
+      # `newobs = NULL` to force to recursively use 1-step-ahead predictions
+      pred <- predict(
+        fit,
+        n.ahead = horizon, newobs = NULL, newxreg = newxreg,
+        method = "bootstrap", estim = "ignore"
+      )
+
+      dists <- apply(pred$futureobs, 1, \(obs) dist_sample(list(obs)))
+
+      tibble(
         startweek = start_idx,
         actualweek = start_idx + (1:horizon - 1),
         preds = pred$pred,
         lowers = (pred$interval[, "lower"]),
         uppers = (pred$interval[, "upper"]),
+      ) %>%
+        mutate(dist = dists, dist = dist[[1]])
+    },
+    cl = cl
+  ) %>% list_c()
+}
+
+source("./boot_pi.R", chdir = TRUE)
+
+recur_miso_glm <- function(
+    train_set, test_set,
+    start_indices,
+    glm_formula,
+    horizon = 4,
+    glm_family = c("poisson"),
+    cl = NULL) {
+  glm_family <- match.arg(glm_family)
+
+  # browser()
+
+  pbapply::pblapply(
+    start_indices,
+    \(start_idx) {
+      train_df <- train_set %>%
+        bind_rows(test_set %>% slice_head(n = start_idx)) %>%
+        tail(nrow(train_set))
+
+      test_df <- test_set %>%
+        slice_tail(n = 52 - start_idx + 1) %>%
+        head(horizon)
+
+      model <- glm(glm_formula, family = glm_family, data = train_df)
+
+      pred <- boot_pi(model, test_df)
+
+      forecast_df <- tibble(
+        startweek = start_idx,
+        actualweek = start_idx + (1:horizon - 1),
+        preds = pred$pred,
+        lower = pred$lower,
+        upper = pred$upper,
       )
-
-      # browser()
-
-      if (pred$method == "bootstrap") {
-        dists <- apply(pred$futureobs, 1, \(obs) dist_sample(list(obs)))
-        forecast_df %<>%
-          mutate(dist = dists, dist = dist[[1]])
-      }
 
       forecast_df
     },

@@ -1,0 +1,74 @@
+# Library
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(magrittr)
+library(patchwork)
+
+library(feasts)
+library(fable.prophet)
+library(fabletools)
+library(fable)
+
+library(tsibble)
+library(lubridate)
+
+library(tscount)
+```
+
+```{r}
+theme_set(theme_bw())
+```
+
+# Data ingestion
+
+```{r}
+source("../utils/data_weekly.R", chdir = TRUE)
+train_weekly_df <- train_weekly_df %>% bind_rows(val_weekly_df)
+train_weekly_df %>% tail()
+```
+
+# Base GLM
+```{r}
+poi_fit <- glm(n ~ date_admitted, family = "poisson", data = train_weekly_df)
+poi_fit
+```
+
+```{r}
+test_weekly_df %>%
+  head(4) %>%
+  mutate(
+    predicted = predict(poi_fit, newdata = test_weekly_df %>% head(4), type = "response")
+  )
+```
+
+# TSGLM
+
+```{r}
+poi_ts_fit <- tsglm(train_weekly_df$n, xreg = train_weekly_df$date_admitted, link = "log", distr = "poisson")
+poi_ts_fit
+```
+
+```{r}
+test_weekly_df %>%
+  head(4) %>%
+  mutate(predicted = predict(
+    poi_ts_fit,
+    n.ahead = 4,
+    newxreg = test_weekly_df %>%
+      head(4) %>%
+      pull(date_admitted)
+  )$pred)
+```
+
+# fable TSLM
+
+```{r}
+poi_fab_fit <- train_weekly_df %>%
+  model(TSLM(log(n) ~ date_admitted))
+report(poi_fab_fit)
+```
+
+```{r}
+poi_fab_fit %>% forecast(test_weekly_df %>% head(4))
+```
