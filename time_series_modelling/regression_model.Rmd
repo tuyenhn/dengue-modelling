@@ -408,21 +408,45 @@ nb_covar_fits %>% ggplot() +
 ## Covariable selection
 
 ```{r}
-tsglm <- recur_miso(
+full_model_glm <- glm(
+  as.formula(paste0("n ~ ", paste(covar_names, collapse = " + "))),
+  family = "poisson",
+  data = train_weekly_weather_df %>%
+    as_tibble() %>%
+    select(-date_admitted)
+)
+stepwise_forward <- glmtoolbox::stepCriterion(
+  full_model_glm,
+  criterion = "adjr2",
+  direction = "forward", trace = FALSE
+)
+stepwise_backward <- glmtoolbox::stepCriterion(
+  full_model_glm,
+  criterion = "adjr2",
+  direction = "backward", trace = FALSE
+)
+
+stepwise_forward$final
+stepwise_backward$final
+```
+
+
+```{r}
+clusterExport(cl, c("stepwise_forward", "stepwise_backward", "as_tibble_col"))
+
+fsel_covar_glm <- recur_miso_glm(
   train_weekly_weather_df, test_weekly_weather_df, seq(1, 49, 3),
-  xreg_names = c("t2m"), link = "log", distr = "poisson"
+  glm_formula = as.formula(paste0("n ", stepwise_forward$final)),
+  cl = cl
 ) %>%
   mutate(
     date_admitted = yearweek(paste0("2019 W", actualweek)),
     .before = everything()
   )
-```
 
-
-```{r}
-base_glm <- recur_miso_glm(
-  train_weekly_weather_df, test_weekly_weather_df,
-  seq(1, 49, 3), n ~ t2m,
+bsel_covar_glm <- recur_miso_glm(
+  train_weekly_weather_df, test_weekly_weather_df, seq(1, 49, 3),
+  glm_formula = as.formula(paste0("n ", stepwise_forward$final)),
   cl = cl
 ) %>%
   mutate(
@@ -432,37 +456,50 @@ base_glm <- recur_miso_glm(
 ```
 
 ```{r}
-ggplot(test_weekly_df) +
-  geom_line(aes(x = date_admitted, y = n)) +
-  forecast_layer(tsglm %>% rename(n = dist, .mean = preds), funnel = FALSE) +
-  forecast_layer(base_glm %>% rename(.mean = preds, lowers = lower, uppers = upper), funnel = FALSE)
-```
+p1_fsel <- forecast_plot_default(
+  fsel_covar_glm %>% rename(.mean = preds),
+  test_weekly_df, "",
+  funnel = FALSE
+)
+p1_fsel
 
+p1_bsel <- forecast_plot_default(
+  bsel_covar_glm %>% rename(.mean = preds),
+  test_weekly_df, "",
+  funnel = FALSE
+)
+p1_bsel
+```
 
 
 ```{r}
-full_model_glm <- glm(
-  n ~ .,
-  family = poisson,
-  data = train_weekly_weather_df %>%
-    as_tibble() %>%
-    select(-date_admitted)
-)
-stepwise_forward <- glmtoolbox::stepCriterion(
-  full_model_glm,
-  direction = "forward"
+fsel_pre_perf_df <- fsel_covar_glm %>%
+  select(date_admitted, preds, dist, startweek) %>%
+  rename(.mean = preds) %>%
+  left_join(test_weekly_df, by = "date_admitted")
+
+chunks_forecast_res_df <- chunks_forecast_perf(
+  fsel_pre_perf_df, "Poisson",
+  scoringRules::crps_sample, matrix(parameters(dist)$x[[1]], nrow = n())
 )
 
-glm(
-  as.formula(paste0("n", stepwise_forward$final)),
-  family = poisson,
-  data = train_weekly_weather_df %>%
-    as_tibble() %>%
-    select(-date_admitted)
-) %>%
-  predict(newdata = test_weekly_weather_df %>% head(4), type = "response")
+p2_fsel <- metrics_plot(chunks_forecast_res_df, fsel_pre_perf_df$date_admitted)
+p1_fsel / p2_fsel
+
+
+bsel_pre_perf_df <- bsel_covar_glm %>%
+  select(date_admitted, preds, dist, startweek) %>%
+  rename(.mean = preds) %>%
+  left_join(test_weekly_df, by = "date_admitted")
+
+chunks_forecast_res_df <- chunks_forecast_perf(
+  bsel_pre_perf_df, "Poisson",
+  scoringRules::crps_sample, matrix(parameters(dist)$x[[1]], nrow = n())
+)
+
+p2_bsel <- metrics_plot(chunks_forecast_res_df, bsel_pre_perf_df$date_admitted)
+p1_bsel / p2_bsel
 ```
-
 
 # Parallelization teardown
 ```{r}

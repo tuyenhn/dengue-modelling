@@ -9,21 +9,22 @@ boot_pi <- function(model, newdata, boot_n = 1000, p = 0.95) {
   boot_y <- lapply(1:boot_n, \(i){
     set.seed(seeds[i])
     booted <- train_data[sample(seq(nrow(train_data)), size = nrow(train_data), replace = TRUE), ]
-    refitted <- update(model, formula = model$formula, family = model$family, data = booted)
-    bpred <- predict(refitted, type = "response", newdata = newdata)
+    bpred <- predict(update(model, data = booted), type = "response", newdata = newdata)
     rpois(length(bpred), lambda = bpred)
   }) %>% do.call(what = rbind)
 
-  set.seed(123)
+  set.seed(123) # reset seed to default
 
   boot_ci <- t(apply(boot_y, 2, quantile, c(lower_q, upper_q)))
 
+  # browser()
+
   return(
-    tibble(
-      index = newdata[[1]],
-      pred = predict(model, newdata = newdata, type = "response"),
-      lower = boot_ci[, 1],
-      upper = boot_ci[, 2]
+    list(
+      preds = predict(model, newdata = newdata, type = "response"),
+      lowers = boot_ci[, 1],
+      uppers = boot_ci[, 2],
+      bootstrap = boot_y
     )
   )
 }

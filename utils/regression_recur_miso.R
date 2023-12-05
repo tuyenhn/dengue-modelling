@@ -28,9 +28,6 @@ recur_miso <- function(
           as_tibble() %>%
           select(all_of(xreg_names)) %>%
           as.matrix()
-
-        browser()
-
         newxreg <- test_set %>%
           tail(52 - start_idx + 1) %>%
           head(horizon) %>%
@@ -76,31 +73,35 @@ recur_miso_glm <- function(
 
   # browser()
 
-  pbapply::pblapply(
-    start_indices,
-    \(start_idx) {
-      train_df <- train_set %>%
-        bind_rows(test_set %>% slice_head(n = start_idx)) %>%
-        tail(nrow(train_set))
+  eval(substitute(
+    pbapply::pblapply(
+      start_indices,
+      \(start_idx) {
+        train_df <- train_set %>%
+          bind_rows(test_set %>% slice_head(n = start_idx)) %>%
+          tail(nrow(train_set))
 
-      test_df <- test_set %>%
-        slice_tail(n = 52 - start_idx + 1) %>%
-        head(horizon)
+        test_df <- test_set %>%
+          slice_tail(n = 52 - start_idx + 1) %>%
+          head(horizon)
 
-      model <- glm(glm_formula, family = glm_family, data = train_df)
+        model <- glm(glm_formula, family = glm_family, data = train_df)
+        pred <- boot_pi(model, test_df)
 
-      pred <- boot_pi(model, test_df)
+        dists <- apply(pred$bootstrap, 2, \(b) dist_sample(list(b)))
 
-      forecast_df <- tibble(
-        startweek = start_idx,
-        actualweek = start_idx + (1:horizon - 1),
-        preds = pred$pred,
-        lower = pred$lower,
-        upper = pred$upper,
-      )
+        forecast_df <- tibble(
+          startweek = start_idx,
+          actualweek = start_idx + (1:horizon - 1),
+          preds = pred$preds,
+          lowers = pred$lowers,
+          uppers = pred$uppers
+        ) %>%
+          mutate(dist = dists, dist = dist[[1]])
 
-      forecast_df
-    },
-    cl = cl
-  ) %>% list_c()
+        forecast_df
+      },
+      cl = cl
+    )
+  )) %>% list_c()
 }
