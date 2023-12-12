@@ -55,11 +55,22 @@ incidence_full_renamed <- incidence_full %>%
     hospital = tolower(hospital),
     date_admitted = yearweek(date_admitted)
   ) %>%
-  filter(status == "in-patient", hospital != "trung tâm y tế  huyện vĩnh hưng") %>%
-  group_by(date_admitted, hospital) %>%
-  summarise(n = n())
+  filter(status == "in-patient", hospital != "trung tâm y tế  huyện vĩnh hưng")
 
-incidence_full_renamed %<>% ungroup() %>%
+
+incidence_ts_truncated <- incidence_full_renamed %>%
+  filter(hospital == "bênh viện bệnh nhiệt đới tphcm" | hospital == "bệnh viện nhi đồng 2") %>%
+  group_by(date_admitted) %>%
+  tally() %>%
+  mutate(date_admitted = as.Date(date_admitted))
+
+incidence_ts_truncated %>% write_csv("incidence_ts_truncated.csv")
+
+
+incidence_full_renamed %<>%
+  group_by(date_admitted, hospital) %>%
+  summarise(n = n()) %>%
+  ungroup() %>%
   complete(date_admitted, hospital)
 incidence_full_renamed
 ```

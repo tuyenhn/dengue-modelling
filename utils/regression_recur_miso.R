@@ -18,7 +18,7 @@ recur_miso <- function(
     start_indices,
     \(start_idx) {
       train_df <- train_set %>%
-        bind_rows(test_set %>% slice_head(n = start_idx)) %>%
+        bind_rows(test_set %>% slice_head(n = start_idx - 1)) %>%
         tail(nrow(train_set))
 
       xreg <- NULL

@@ -20,8 +20,6 @@ library(patchwork)
 
 library(pbapply)
 library(parallel)
-library(foreach)
-library(doParallel)
 
 library(distributional)
 ```
@@ -129,13 +127,12 @@ clusterExport(cl, c(
   "%<>%", "incidence_weekly_weather_df", "recur_miso", "test_weekly_df",
   "chunks_forecast_perf", "model_perfs"
 ))
-registerDoParallel(cl)
 ```
 
 ## Poisson
 
 ### 1-week lag
-Just the intercept
+
 ```{r}
 poi_covar_forecast_df <- recur_miso(
   train_weekly_weather_df, test_weekly_weather_df,
@@ -147,8 +144,7 @@ poi_covar_forecast_df <- recur_miso(
 
 p1 <- forecast_plot_default(
   poi_covar_forecast_df, test_weekly_df,
-  "4 week forecast - Poisson regression 1-week lag",
-  funnel = FALSE
+  "4 week forecast - Poisson regression 1-week lag", FALSE
 )
 p1
 
@@ -173,7 +169,11 @@ p1 / p2
 ### Auto lagged
 
 ```{r}
-auto_lagged_df <- foreach(lag = 0:20) %dopar% {
+clusterExport(cl, c(
+  "train_weekly_weather_df", "test_weekly_weather_df"
+))
+
+auto_lagged_df <- pblapply(1:20, \(lag) {
   forecast_df <- recur_miso(
     train_weekly_weather_df, test_weekly_weather_df,
     seq(1, 49, 3),
@@ -199,7 +199,7 @@ auto_lagged_df <- foreach(lag = 0:20) %dopar% {
     lag = lag,
     covar = "auto"
   )
-}
+}, cl = cl)
 ```
 
 ```{r}
@@ -358,6 +358,46 @@ p1 / p2
 
 ggsave("../time_series_modelling/svgs/forecast_poisson_all_covar_lags_perf.svg", width = 10, height = 7)
 ```
+
+### Distributed lag linear
+
+```{r}
+dlag_df <- incidence_weekly_weather_df
+for (lag in 1:20) {
+  for (covar in colnames(incidence_weekly_weather_df)[-c(1, 2)]) {
+    colname <- sprintf("%s_l%d", covar, lag)
+    dlag_df %<>% mutate(!!colname := lag(!!sym(covar), lag))
+  }
+}
+dlag_df
+```
+
+```{r}
+covar_names <- incidence_weekly_weather_df %>%
+  as_tibble() %>%
+  select(-c(date_admitted, n)) %>%
+  colnames()
+
+train_df <- dlag_df %>%
+  filter_index("2000 W01" ~ "2018 W52")
+
+test_df <- dlag_df %>%
+  filter_index("2019 W01" ~ "2019 W52")
+
+poi_dlm_forecast_df <- recur_miso(
+  train_df, test_df,
+  seq(1, 49, 3),
+  model = list(past_obs = 1), xreg_names = covar_names,
+  link = "log", distr = "poisson"
+) %>%
+  mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
+
+forecast_plot_default(
+  poi_dlm_forecast_df, test_weekly_df,
+  "4 week forecast - Poisson regression distributed lag"
+)
+```
+
 
 ## Negative Binomial
 
