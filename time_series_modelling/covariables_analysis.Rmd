@@ -8,11 +8,17 @@ library(distributional)
 library(parallel)
 library(pbapply)
 library(GGally)
+library(modelr)
+library(distributional)
+library(scoringRules)
+library(future)
+library(furrr)
 
 source("../utils/data_weekly.R", chdir = TRUE)
 source("../utils/covar_fns.R", chdir = TRUE)
 source("../utils/regression_recur_miso.R", chdir = TRUE)
 source("../utils/performance_checking_framework.R", chdir = TRUE)
+source("../utils/cross_validation.R", chdir = TRUE)
 
 set.seed(123)
 ```
@@ -162,34 +168,36 @@ hist(hcmc_mx_mnsh24_df$mnsh24)
 hist(hcmc_mx_mnsh24_df$mxsh24)
 ```
 
+## Standardized Precipitation Index 
+Daily SPI shows how wet/dry was the weather compared to the usual using for the last 30 days. Data is aggregated to weekly using averaging.
+
+```{r}
+plot_covar(
+  hcmc_spi_df, "Average SPI", "Weekly mean SPI",
+  layer(
+    geom = "hline", stat = "identity", position = "identity",
+    params = list(yintercept = 0, color = "red", linetype = "dashed")
+  )
+)
+
+ggsave("./svgs/weekly_spi_ts.svg", width = 10, height = 7)
+
+hist(hcmc_spi_df$spi_daily)
+```
+
 
 # Covariable individual performance
 
 ```{r}
-covar_poi_perf <- function(covar_name) {
-  forecast_df <- recur_miso(
-    train_weekly_weather_df, test_weekly_weather_df,
-    seq(1, 49, 3),
-    model = list(past_obs = 1), xreg_names = c(covar_name),
-    link = "log", distr = "poisson"
-  ) %>%
-    mutate(date = yearweek(paste0("2019 W", actualweek)), .before = everything())
+incidence_ww_trunc_df <- calculate_lags(incidence_weekly_weather_df, "n", 1) %>%
+  filter_index("2004 W01" ~ "2019 W52") %>%
+  as_tibble() %>%
+  mutate(week = isoweek(date_admitted), month = month(date_admitted)) %>%
+  select(-date_admitted) %>%
+  rowid_to_column()
 
-  pre_perf_df <- forecast_df %>%
-    select(date, dist, preds, startweek) %>%
-    left_join(test_weekly_df, by = c("date" = "date_admitted")) %>%
-    rename(.mean = preds)
-
-  chunks_forecast_res_df <- chunks_forecast_perf(
-    pre_perf_df, sprintf("Poisson w/ %s", covar_name),
-    scoringRules::crps_sample, matrix(parameters(dist)$x[[1]], nrow = n()),
-    log_model_perf = FALSE
-  )
-
-  chunks_forecast_res_df %>%
-    summarise(across(c("RMSE", "CRPS"), mean)) %>%
-    mutate(model = sprintf("Poisson w/ %s", covar_name), .before = everything())
-}
+train_dat <- incidence_ww_trunc_df %>% sample_frac(.75)
+test_dat <- anti_join(incidence_ww_trunc_df, train_dat, by = "rowid")
 
 covar_names <- incidence_weekly_weather_df %>%
   as_tibble() %>%
@@ -198,33 +206,43 @@ covar_names <- incidence_weekly_weather_df %>%
 covar_names
 ```
 
+
 ```{r}
-cl <- makeCluster(7)
-invisible(clusterEvalQ(cl, library(tidyverse)))
-invisible(clusterEvalQ(cl, library(magrittr)))
-invisible(clusterEvalQ(cl, library(tscount)))
-invisible(clusterEvalQ(cl, library(tsibble)))
-invisible(clusterEvalQ(cl, library(distributional)))
-clusterExport(
-  cl,
-  c("recur_miso", "train_weekly_weather_df", "test_weekly_weather_df", "test_weekly_df", "chunks_forecast_perf")
-)
+plan(multisession, workers = 7)
 
-poi_covar_perfs <- pblapply(covar_names, covar_poi_perf, cl = cl) %>% list_c()
+covar_cv_perfs <- future_map(
+  covar_names, \(covar) rep_kfold_cv_covar(train_dat, covar),
+  .options = furrr_options(seed = TRUE), .progress = TRUE
+) %>% list_c()
 
-stopCluster(cl)
+plan(sequential)
 ```
 
 ```{r}
-poi_covar_perfs
+covar_cv_perfs
 ```
 
+
 ```{r}
-poi_covar_perfs %>%
-  ggplot(aes(x = CRPS, y = fct_reorder(model, desc(CRPS)))) +
-  geom_col() +
-  scale_y_discrete("Model")
+covar_cv_perfs %>%
+  pivot_longer(-model) %>%
+  unnest(value) %>%
+  group_by(name, model) %>%
+  mutate(group = dense_rank(value)) %>%
+  arrange(model) %>%
+  ggplot(aes(x = value, y = model, color = name)) +
+  geom_point(alpha = 0.9) +
+  geom_path(aes(group = group), alpha = 0.9) +
+  stat_summary(
+    fun = mean, geom = "errorbar", aes(xmax = ..x.., ymin = ..x..),
+    width = 0.75, color = "black"
+  ) +
+  scale_y_discrete("Model") +
+  scale_x_continuous("Average performance across 5-repetition 5-fold CV") +
+  scale_color_discrete(guide = "none") +
+  facet_wrap(~name, nrow = 1, scales = "free_x")
 ```
+
 
 # Relationship with incidence
 

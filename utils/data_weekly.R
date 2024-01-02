@@ -1,5 +1,5 @@
-library(tidyverse)
-library(tsibble)
+invisible(library(tidyverse))
+invisible(library(tsibble))
 
 # library(sf)
 # library(stars)
@@ -51,6 +51,8 @@ source("data_weekly_weather.R")
 # test_weekly_weather_df <- incidence_weekly_weather_df %>%
 #   filter_index("2019 W01" ~ "2019 W52")
 
+
+
 # incidence_weekly_weather_df %>% write_rds("data_weekly_rds-s/incidence_weekly_weather_df.rds")
 # train_weekly_weather_df %>% write_rds("data_weekly_rds-s/train_weekly_weather_df.rds")
 # val_weekly_weather_df %>% write_rds("data_weekly_rds-s/val_weekly_weather_df.rds")
@@ -60,3 +62,5 @@ incidence_weekly_weather_df <- read_rds("data_weekly_rds-s/incidence_weekly_weat
 train_weekly_weather_df <- read_rds("data_weekly_rds-s/train_weekly_weather_df.rds")
 val_weekly_weather_df <- read_rds("data_weekly_rds-s/val_weekly_weather_df.rds")
 test_weekly_weather_df <- read_rds("data_weekly_rds-s/test_weekly_weather_df.rds")
+
+print("all data loaded")

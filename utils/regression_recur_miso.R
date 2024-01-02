@@ -68,7 +68,7 @@ recur_miso_glm <- function(
     glm_formula,
     horizon = 4,
     glm_family = c("poisson"),
-    cl = NULL) {
+    cl = NULL, ret_coefs = FALSE) {
   glm_family <- match.arg(glm_family)
 
   # browser()
@@ -98,6 +98,10 @@ recur_miso_glm <- function(
           uppers = pred$uppers
         ) %>%
           mutate(dist = dists, dist = dist[[1]])
+
+        if (ret_coefs) {
+          forecast_df %<>% mutate(coefs = list(model$coefficients))
+        }
 
         forecast_df
       },

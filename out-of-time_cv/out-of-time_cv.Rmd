@@ -1,0 +1,37 @@
+---
+output: 
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: journal
+---
+
+**Knitted at: `r Sys.time()`**
+
+# Libraries
+```{r message=FALSE, warning=FALSE}
+.pkgs <- c("tidyverse", "magrittr", "rsample", "tsibble")
+xfun::pkg_attach(.pkgs, message = FALSE)
+```
+
+# Settings
+```{r}
+theme_set(theme_bw())
+set.seed(123)
+```
+
+# Data ingestion
+```{r}
+incidence_weekly_weather_df <- read_rds("../utils/data_weekly_rds-s/incidence_weekly_weather_df.rds")
+
+incidence_ww_trunc_df <- incidence_weekly_weather_df %>%
+  filter_index("2004 W01" ~ "2019 W52") %>%
+  as_tibble() %>%
+  mutate(week = isoweek(date_admitted), month = month(date_admitted)) %>%
+  select(-date_admitted) %>%
+  rowid_to_column()
+
+dat_split <- 
+train_dat <- incidence_ww_trunc_df %>% sample_frac(.75)
+test_dat <- anti_join(incidence_ww_trunc_df, train_dat, by = "rowid")
+```

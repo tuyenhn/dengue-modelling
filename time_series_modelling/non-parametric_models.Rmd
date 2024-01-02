@@ -48,6 +48,8 @@ ggplot(incidence_weekly_df, aes(x = date_admitted, y = n)) +
   scale_x_yearweek("Week of admission") +
   scale_y_continuous("Case admitted") +
   ggtitle("Dengue weekly incidence")
+
+ggsave("./svgs/weekly_incidence_ts.svg", width = 10, height = 7)
 ```
 
 ```{r}

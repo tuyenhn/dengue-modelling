@@ -1,7 +1,7 @@
 # generate any covar from name
-gen_covar_df <- function(covar_name, agg_fn, trans_fn = identity, ..., new_covar_name = NULL) {
+gen_covar_df <- function(covar_name, agg_fn, trans_fn = identity, ..., new_covar_name = NULL, dataset = raw_weather) {
   # browser()
-  raw_weather %>%
+  dataset %>%
     select(all_of(covar_name)) %>%
     aggregate("1 week", FUN = agg_fn) %>%
     aggregate(hcmc_shp_w_buff, FUN = agg_fn) %>%
@@ -15,12 +15,13 @@ gen_covar_df <- function(covar_name, agg_fn, trans_fn = identity, ..., new_covar
     as_tsibble(index = date)
 }
 
-gen_mean_covar_df <- function(covar_name, trans_fn = identity, ..., new_covar_name = NULL) {
+gen_mean_covar_df <- function(covar_name, trans_fn = identity, ..., new_covar_name = NULL, dataset = raw_weather) {
   gen_covar_df(
     covar_name = covar_name,
     agg_fn = mean,
     trans_fn = trans_fn, ...,
-    new_covar_name = new_covar_name
+    new_covar_name = new_covar_name,
+    dataset = dataset
   )
 }
 

@@ -1,6 +1,12 @@
 # from: https://www.r-bloggers.com/2015/12/prediction-intervals-for-poisson-regression/
-boot_pi <- function(model, newdata, boot_n = 1000, p = 0.95) {
-  train_data <- model$data
+boot_pi <- function(model, newdata, boot_n = 1000, p = 0.95, type = "response") {
+  # browser()
+  model_dat <- model$data
+  if (inherits(model_dat, "resample")) {
+    train_data <- model_dat$data[model_dat$idx, ]
+  } else {
+    train_data <- model_dat
+  }
   lower_q <- (1 - p) / 2
   upper_q <- 1 - lower_q
 
@@ -9,7 +15,7 @@ boot_pi <- function(model, newdata, boot_n = 1000, p = 0.95) {
   boot_y <- lapply(1:boot_n, \(i){
     set.seed(seeds[i])
     booted <- train_data[sample(seq(nrow(train_data)), size = nrow(train_data), replace = TRUE), ]
-    bpred <- predict(update(model, data = booted), type = "response", newdata = newdata)
+    bpred <- predict(update(model, formula = model$formula, data = booted), type = type, newdata = newdata)
     rpois(length(bpred), lambda = bpred)
   }) %>% do.call(what = rbind)
 
@@ -21,7 +27,7 @@ boot_pi <- function(model, newdata, boot_n = 1000, p = 0.95) {
 
   return(
     list(
-      preds = predict(model, newdata = newdata, type = "response"),
+      preds = predict(model, newdata = newdata, type = type),
       lowers = boot_ci[, 1],
       uppers = boot_ci[, 2],
       bootstrap = boot_y
