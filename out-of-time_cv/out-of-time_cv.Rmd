@@ -8,10 +8,13 @@ output:
 
 **Knitted at: `r Sys.time()`**
 
-# Libraries
+# Libraries and functions
 ```{r message=FALSE, warning=FALSE}
-.pkgs <- c("tidyverse", "magrittr", "rsample", "tsibble")
+.pkgs <- c("tidyverse", "magrittr", "rsample", "tsibble", "modelr", "furrr", "distributional", "scoringRules")
 xfun::pkg_attach(.pkgs, message = FALSE)
+
+source("../utils/cross_validation.R", chdir = TRUE)
+source("../utils/boot_pi.R", chdir = TRUE)
 ```
 
 # Settings
@@ -23,15 +26,82 @@ set.seed(123)
 # Data ingestion
 ```{r}
 incidence_weekly_weather_df <- read_rds("../utils/data_weekly_rds-s/incidence_weekly_weather_df.rds")
+```
 
-incidence_ww_trunc_df <- incidence_weekly_weather_df %>%
+## Feature engineering
+
+```{r}
+incidence_ww_trunc_df <- incidence_weekly_weather_df
+
+# 3 months incidence lag
+incidence_ww_trunc_df %<>% calculate_lags("n", 1:12)
+
+# truncate date, remove temporal data
+incidence_ww_trunc_df %<>%
   filter_index("2004 W01" ~ "2019 W52") %>%
   as_tibble() %>%
   mutate(week = isoweek(date_admitted), month = month(date_admitted)) %>%
   select(-date_admitted) %>%
   rowid_to_column()
+```
 
-dat_split <- 
-train_dat <- incidence_ww_trunc_df %>% sample_frac(.75)
-test_dat <- anti_join(incidence_ww_trunc_df, train_dat, by = "rowid")
+```{r}
+incidence_ww_trunc_df
+```
+
+## Train test splitting
+
+```{r}
+dat_split <- initial_split(incidence_ww_trunc_df)
+train_dat <- training(dat_split)
+test_dat <- testing(dat_split)
+
+ggplot(mapping = aes(x = rowid, y = n)) +
+  geom_point(data = train_dat, alpha = 0.8) +
+  geom_point(data = test_dat, color = "red", alpha = 0.8)
+```
+
+
+# Modelling
+
+## Autoregression
+```{r}
+ar_formula <- as.formula(paste0("n ~ ", paste("n_lag", 1:12, sep = "", collapse = " + ")))
+
+plan(multisession, workers = 7)
+ar_perfs <- rep_kfold_cv_glm(ar_formula, train_dat)
+plan(sequential)
+```
+
+```{r}
+ar_perfs_df <- ar_perfs %>%
+  as_tibble() %>%
+  mutate(rep = rep(seq_len(5), each = 5), k = rep(1:5, 5), .before = everything()) %>%
+  pivot_longer(-c(rep, k))
+```
+
+
+```{r}
+ar_perfs_df %>%
+  ggplot(aes(y = value, x = rep, color = name)) +
+  geom_point() +
+  stat_summary(
+    fun = mean, geom = "errorbar", color = "black",
+    aes(ymax = after_stat(y), ymin = after_stat(y), width = 0.5)
+  ) +
+  facet_wrap(~name, scales = "free_y") +
+  scale_x_continuous(minor_breaks = NULL) +
+  guides(color = "none")
+```
+
+```{r}
+ar_perfs_df %>% ggplot(aes(y = value, x = name, color = name)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  guides(color = "none")
+```
+
+## With covariables
+
+```{r}
 ```

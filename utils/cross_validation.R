@@ -3,7 +3,7 @@ calculate_lags <- function(df, var, lags) {
   return(df %>% mutate(across(.cols = all_of({{ var }}), .fns = map_lag, .names = "{.col}_lag{lags}")))
 }
 
-rep_kfold_cv_glm <- function(formula, dataset, rep, k) {
+rep_kfold_cv_glm <- function(formula, dataset, rep = 5, k = 5) {
   seeds <- round(runif(rep, 1, 1000), 0)
   cv <- lapply(1:rep, \(r){
     set.seed(seeds[r])
