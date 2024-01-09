@@ -7,18 +7,33 @@ dat <- incidence_weekly_weather_df %>%
 # vcm_fit <- gam(n ~ s(date, by = t2m), family = poisson(), data = dat)
 tvreg_fit <- tvLM(n ~ t2m, data = dat)
 lm_fit <- lm(n ~ t2m, data = dat)
+glm_fit <- glm(n ~ t2m, family = "poisson", data = dat)
 
 summary(tvreg_fit)
 coef(tvreg_fit)
 
 {
-  plot(dat$date, tvreg_fit$coefficients[, 2], type = "l")
-  abline(h = lm_fit$coefficients[2])
+  plot(
+    dat$date, tvreg_fit$coefficients[, 2],
+    type = "l",
+    main = "Covariable (2m temperature) coefficient\namong different regression models",
+    xlab = "Time index",
+    ylab = "Coefficient value(s)"
+  )
+  abline(h = lm_fit$coefficients[2], col = "red")
+  abline(h = glm_fit$coefficients[2], col = "blue")
+  legend(
+    "bottomright",
+    legend = c("Time-varying coefficients", "LM coefficient", "GLM Poisson coefficient"),
+    col = c("black", "red", "blue"), lty = 1, cex = 0.3, pt.cex = 1
+  )
 }
 
+hist(tvreg_fit$coefficients[, 2])
 acf(tvreg_fit$coefficients[, 2])
 pacf(tvreg_fit$coefficients[, 2])
 
+###############################################################
 dat <- incidence_weekly_weather_df %>%
   calculate_lags("t2m", 1:5) %>%
   filter_index("2004 W01" ~ "2019 W52") %>%
@@ -32,6 +47,11 @@ tvreg_fit <- tvLM(
 )
 lm_fit <- lm(
   formula = as.formula(paste0("n ~ t2m + ", paste("t2m_lag", 1:5, sep = "", collapse = " + "))),
+  data = dat
+)
+glm_fit <- glm(
+  formula = as.formula(paste0("n ~ t2m + ", paste("t2m_lag", 1:5, sep = "", collapse = " + "))),
+  family = "poisson",
   data = dat
 )
 
@@ -49,8 +69,20 @@ tvreg_coefs_df %>%
   geom_line(aes(x = rowid, y = mean_t2m_coef), color = "black")
 
 {
-  plot(tvreg_coefs_df$rowid, tvreg_coefs_df$mean_t2m_coef, type = "l")
-  abline(h = mean(lm_fit$coefficients[-1]))
+  plot(
+    dat$date, tvreg_fit$coefficients[, 2],
+    type = "l",
+    main = "Distributed lag covariable (2m temperature)\ncoefficients among different regression models",
+    xlab = "Time index",
+    ylab = "Coefficient value(s)"
+  )
+  abline(h = mean(lm_fit$coefficients[-1]), col = "red")
+  abline(h = mean(glm_fit$coefficients[-1]), col = "blue")
+  legend(
+    "bottomright",
+    legend = c("Time-varying coefficients", "LM coefficient", "GLM Poisson coefficient"),
+    col = c("black", "red", "blue"), lty = 1, cex = 0.6, pt.cex = 1
+  )
 }
 
 hist(tvreg_coefs_df$mean_t2m_coef)

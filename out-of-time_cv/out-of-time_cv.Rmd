@@ -32,9 +32,13 @@ incidence_weekly_weather_df <- read_rds("../utils/data_weekly_rds-s/incidence_we
 
 ```{r}
 incidence_ww_trunc_df <- incidence_weekly_weather_df
+covar_names <- colnames(incidence_ww_trunc_df)[-c(1, 2)]
 
 # 3 months incidence lag
 incidence_ww_trunc_df %<>% calculate_lags("n", 1:12)
+for (covar in covar_names) {
+  incidence_ww_trunc_df %<>% calculate_lags(covar, 1:12)
+}
 
 # truncate date, remove temporal data
 incidence_ww_trunc_df %<>%
@@ -43,9 +47,7 @@ incidence_ww_trunc_df %<>%
   mutate(week = isoweek(date_admitted), month = month(date_admitted)) %>%
   select(-date_admitted) %>%
   rowid_to_column()
-```
 
-```{r}
 incidence_ww_trunc_df
 ```
 
@@ -80,7 +82,6 @@ ar_perfs_df <- ar_perfs %>%
   pivot_longer(-c(rep, k))
 ```
 
-
 ```{r}
 ar_perfs_df %>%
   ggplot(aes(y = value, x = rep, color = name)) +
@@ -101,7 +102,98 @@ ar_perfs_df %>% ggplot(aes(y = value, x = name, color = name)) +
   guides(color = "none")
 ```
 
-## With covariables
+## All covariables
 
 ```{r}
+covar_formula <- as.formula(paste0("n ~ ", paste(covar_names, collapse = " + ")))
+
+plan(multisession, workers = 7)
+covar_perfs <- rep_kfold_cv_glm(covar_formula, train_dat)
+plan(sequential)
+```
+
+```{r}
+covar_perfs_df <- covar_perfs %>%
+  as_tibble() %>%
+  mutate(rep = rep(seq_len(5), each = 5), k = rep(1:5, 5), .before = everything()) %>%
+  pivot_longer(-c(rep, k))
+covar_perfs_df
+```
+
+```{r}
+covar_perfs_df %>%
+  ggplot(aes(y = value, x = rep, color = name)) +
+  geom_point() +
+  stat_summary(
+    fun = mean, geom = "errorbar", color = "black",
+    aes(ymax = after_stat(y), ymin = after_stat(y), width = 0.5)
+  ) +
+  facet_wrap(~name, scales = "free_y") +
+  scale_x_continuous(minor_breaks = NULL) +
+  guides(color = "none")
+```
+
+```{r}
+covar_perfs_df %>% ggplot(aes(y = value, x = name, color = name)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  guides(color = "none")
+```
+
+## All lagged covariables (distributed lag model)
+
+```{r}
+dlm_covar_names <- colnames(incidence_ww_trunc_df %>% select(-c(rowid, contains("n"), week, month)))
+dlm_formula <- as.formula(paste0("n ~ ", paste(dlm_covar_names, collapse = " + ")))
+
+plan(multisession, workers = 7)
+dlm_perfs <- rep_kfold_cv_glm(dlm_formula, train_dat)
+plan(sequential)
+```
+
+```{r}
+dlm_perfs_df <- dlm_perfs %>%
+  as_tibble() %>%
+  mutate(rep = rep(seq_len(5), each = 5), k = rep(1:5, 5), .before = everything()) %>%
+  pivot_longer(-c(rep, k))
+dlm_perfs_df
+```
+
+```{r}
+dlm_perfs_df %>%
+  ggplot(aes(y = value, x = rep, color = name)) +
+  geom_point() +
+  stat_summary(
+    fun = mean, geom = "errorbar", color = "black",
+    aes(ymax = after_stat(y), ymin = after_stat(y), width = 0.5)
+  ) +
+  facet_wrap(~name, scales = "free_y") +
+  scale_x_continuous(minor_breaks = NULL) +
+  guides(color = "none")
+```
+
+```{r}
+dlm_perfs_df %>% ggplot(aes(y = value, x = name, color = name)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  guides(color = "none")
+```
+
+
+
+
+## Comparing
+
+```{r}
+all_perfs_df <- ar_perfs_df %>%
+  mutate(from = "ar") %>%
+  bind_rows(
+    covar_perfs_df %>% mutate(from = "covar")
+  ) %>%
+  bind_rows(
+    dlm_perfs_df %>% mutate(from = "dlm")
+  )
+
+all_perfs_df %>% ggplot() +
+  geom_boxplot(aes(x = name, y = value, fill = from))
 ```

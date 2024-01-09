@@ -1,0 +1,75 @@
+---
+output: 
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: journal
+---
+
+**Knitted at: `r Sys.time()`**
+
+# Libraries and functions
+```{r message=FALSE, warning=FALSE}
+.pkgs <- c("tidyverse", "tsibble", "rsample")
+xfun::pkg_attach(.pkgs, message = FALSE)
+
+# source("../utils/cross_validation.R", chdir = TRUE)
+# source("../utils/boot_pi.R", chdir = TRUE)
+```
+
+# Settings
+```{r}
+theme_set(theme_bw())
+set.seed(123)
+```
+
+# Data ingestion and modelling
+```{r}
+dat <- tibble(y = runif(1000, 0, 1000), y_lag1 = lag(y)) %>% tail(-1)
+dat_split <- initial_split(dat)
+train_dat <- training(dat_split)
+test_dat <- testing(dat_split)
+
+model <- lm(y ~ y_lag1, data = train_dat)
+
+y_preds <- predict(model, newdata = test_dat)
+
+test_df <- tibble(y_truth = test_dat$y, y_preds = y_preds)
+test_df
+```
+
+
+# MAE, RMSE
+
+## MAE
+"MAE is calculated as the sum of absolute errors divided by the sample size"
+
+```{r}
+tibble(truth = rep(0, 101), preds = seq(-50, 50, 1), mae = abs(truth - preds)) %>%
+  ggplot() +
+  geom_line(aes(x = preds, y = mae))
+```
+
+
+```{r}
+test_df %>% yardstick::mae(y_truth, y_preds)
+```
+
+
+## RMSE
+
+
+```{r}
+tibble(truth = rep(0, 101), preds = seq(-50, 50, 1), rmse = sqrt((truth - preds)^2)) %>%
+  ggplot() +
+  geom_line(aes(x = preds, y = rmse))
+```
+
+
+```{r}
+test_df %>% yardstick::rmse(y_truth, y_preds)
+```
+
+# Winkler score
+
+# CRPS
