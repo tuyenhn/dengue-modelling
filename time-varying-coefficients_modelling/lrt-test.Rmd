@@ -1,0 +1,79 @@
+---
+output: 
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: journal
+---
+
+**Knitted at: `r Sys.time()`**
+
+# Libraries and functions
+```{r message=FALSE, warning=FALSE}
+.pkgs <- c("tidyverse", "magrittr", "tvReg", "tsibble", "rsample", "mgcv")
+xfun::pkg_attach(.pkgs, message = FALSE)
+
+source("../utils/cross_validation.R", chdir = TRUE)
+# source("../utils/boot_pi.R", chdir = TRUE)
+```
+
+# Settings
+```{r}
+theme_set(theme_bw())
+set.seed(123)
+```
+
+# Data ingestion
+```{r}
+incidence_weekly_weather_df <- read_rds("../utils/data_weekly_rds-s/incidence_weekly_weather_df.rds")
+```
+## Feature engineering
+
+```{r}
+incidence_ww_trunc_df <- incidence_weekly_weather_df %>%
+  filter_index("2004 W01" ~ "2019 W52") %>%
+  select(n, t2m) %>%
+  as_tibble() %>%
+  rowid_to_column()
+
+incidence_ww_trunc_df
+```
+
+# LRT
+
+```{r}
+tvreg_fit <- tvLM(n ~ t2m, data = incidence_ww_trunc_df)
+glm_fit <- glm(n ~ t2m, family = "gaussian", data = incidence_ww_trunc_df)
+vcm_fit <- gam(n ~ s(rowid, by = t2m), family = "gaussian", data = incidence_ww_trunc_df)
+
+summary(tvreg_fit)
+summary(glm_fit)
+summary(vcm_fit)
+```
+
+
+```{r}
+{
+  plot(
+    incidence_ww_trunc_df$rowid, tvreg_fit$coefficients[, 1],
+    type = "l",
+    main = "Covariable (2m temperature) coefficient\namong different regression models",
+    xlab = "Time index",
+    ylab = "Coefficient value(s)"
+  )
+  abline(h = glm_fit$coefficients[1], col = "blue")
+  legend(
+    "bottomright",
+    legend = c("Time-varying coefficients", "GLM Poisson coefficient"),
+    col = c("black", "blue"), lty = 1, cex = 0.7, pt.cex = 1
+  )
+}
+```
+
+```{r}
+anova(glm_fit, tvreg_fit, test = "LRT")
+```
+
+```{r}
+lmtest::lrtest(tvreg_fit, glm_fit)
+```
