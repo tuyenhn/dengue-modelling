@@ -2,7 +2,8 @@
 output: 
   html_document:
     df_print: paged
-    toc: yes
+    toc: true
+    toc_float: true
     theme: journal
 ---
 
@@ -10,11 +11,13 @@ output:
 
 # Libraries and functions
 ```{r message=FALSE, warning=FALSE}
-.pkgs <- c("tidyverse", "tsibble", "rsample")
+.pkgs <- c("tidyverse", "tsibble", "rsample", "distributional", "scoringRules")
 xfun::pkg_attach(.pkgs, message = FALSE)
 
+data(pedestrian)
+
 # source("../utils/cross_validation.R", chdir = TRUE)
-# source("../utils/boot_pi.R", chdir = TRUE)
+source("../utils/boot_pi.R", chdir = TRUE)
 ```
 
 # Settings
@@ -25,51 +28,161 @@ set.seed(123)
 
 # Data ingestion and modelling
 ```{r}
-dat <- tibble(y = runif(1000, 0, 1000), y_lag1 = lag(y)) %>% tail(-1)
+dat <- pedestrian %>%
+  as_tibble() %>%
+  select(Date, Count) %>%
+  group_by(Date) %>%
+  summarise(Count = mean(Count)) %>%
+  mutate(Count_lag1 = lag(Count)) %>%
+  tail(-1)
+
 dat_split <- initial_split(dat)
 train_dat <- training(dat_split)
 test_dat <- testing(dat_split)
 
-model <- lm(y ~ y_lag1, data = train_dat)
+model <- glm(Count ~ Count_lag1, data = train_dat)
 
-y_preds <- predict(model, newdata = test_dat)
+y_preds <- boot_pi(model, newdata = test_dat, type = "response")
+boot_dists <- apply(y_preds$bootstrap, 2, \(b) dist_sample(list(b)))
 
-test_df <- tibble(y_truth = test_dat$y, y_preds = y_preds)
+test_df <- tibble(
+  truth = test_dat$Count, predictions = y_preds$preds,
+  lowers = y_preds$lowers, uppers = y_preds$uppers,
+  dist = boot_dists
+)
 test_df
 ```
 
 
-# MAE, RMSE
+# Point prediction metrics
 
 ## MAE
 "MAE is calculated as the sum of absolute errors divided by the sample size"
 
 ```{r}
-tibble(truth = rep(0, 101), preds = seq(-50, 50, 1), mae = abs(truth - preds)) %>%
-  ggplot() +
-  geom_line(aes(x = preds, y = mae))
-```
-
-
-```{r}
-test_df %>% yardstick::mae(y_truth, y_preds)
+test_df %>% yardstick::mae(truth, predictions)
 ```
 
 
 ## RMSE
-
+"RMSE is the square root of the average of squared errors. The effect of each error on RMSE is proportional to the size of the squared error; thus larger errors have a disproportionately large effect on RMSE. Consequently, RMSE is sensitive to outliers."
 
 ```{r}
-tibble(truth = rep(0, 101), preds = seq(-50, 50, 1), rmse = sqrt((truth - preds)^2)) %>%
-  ggplot() +
-  geom_line(aes(x = preds, y = rmse))
+test_df %>% yardstick::rmse(truth, predictions)
+```
+
+# Probabilistic prediction metrics
+
+## Winkler score
+https://doi.org/10.1080/01621459.1972.10481224
+
+```{r}
+winkler_score <- function(truth, pi_dist, interval = 95) {
+  lower_pi <- hilo(pi_dist, interval)$lower
+  upper_pi <- hilo(pi_dist, interval)$upper
+  int_len <- upper_pi - lower_pi
+  alpha <- 1 - (interval / 100)
+
+  if (truth < lower_pi) {
+    int_len + (2 / alpha) * (lower_pi - truth)
+  } else if (truth > upper_pi) {
+    int_len + (2 / alpha) * (truth - upper_pi)
+  } else {
+    int_len
+  }
+}
+```
+
+```{r}
+w_score_vec <- map2(test_df$truth, test_df$dist, \(truth, dist) winkler_score(truth, dist[1])) %>% list_c()
+
+mean(w_score_vec)
+```
+
+```{r}
+test_df %>%
+  mutate(w_score = w_score_vec) %>%
+  head(10) %>%
+  rowid_to_column() %>%
+  ggplot(aes(x = rowid)) +
+  geom_col(aes(y = w_score / 10), alpha = 0.3, width = 0.25) +
+  geom_pointrange(aes(y = predictions, ymax = uppers, ymin = lowers), color = "red") +
+  geom_point(aes(y = truth), color = "black") +
+  scale_x_continuous("", breaks = NULL) +
+  scale_y_continuous("Winkler score / 10") +
+  ggtitle(
+    "Winkler score",
+    "for 10 random predictions and its PI (red) and the truth value (black)"
+  )
+```
+
+```{r}
+temp_dist <- dist_normal()
+
+tibble(
+  truths = seq(-5, 5, 0.1),
+  w_score = map(truths, \(truth)winkler_score(truth, temp_dist)) %>% list_c(),
+  norm_dense = dnorm(truths)
+) %>% ggplot(aes(x = truths)) +
+  geom_segment(
+    aes(x = hilo(temp_dist)$lower, xend = hilo(temp_dist)$lower, y = 0, yend = 120),
+    color = "gray"
+  ) +
+  geom_segment(
+    aes(x = hilo(temp_dist)$upper, xend = hilo(temp_dist)$upper, y = 0, yend = 120),
+    color = "gray"
+  ) +
+  geom_line(aes(y = norm_dense * 300), alpha = 0.2) +
+  geom_line(aes(y = w_score)) +
+  ggtitle("Winkler score (black)", "for a N(0, 1) distribution at 95% PI  (grey)")
 ```
 
 
+## CRPS
+
+[](https://miro.medium.com/v2/resize:fit:1200/1*TiwKzA_kQ5wZNit4pc4r2g.png)
+
 ```{r}
-test_df %>% yardstick::rmse(y_truth, y_preds)
+temp_dist <- dist_normal()
+quantiles <- seq(10, 100, 1)
+
+norm_cdf <- cdf(temp_dist, quantiles)[[1]]
+degen_cdf <- cdf(dist_degenerate(0), quantiles)[[1]]
+
+{
+  norm_cdf %>% plot(type = "l")
+  degen_cdf %>% lines()
+}
+
+sum((norm_cdf - degen_cdf)^2)
+
+cust_crps <- map(quantiles, \(q){
+  n_cdf <- cdf(dist_poisson(55), quantiles)[[1]]
+  d_cdf <- cdf(dist_degenerate(q), quantiles)[[1]]
+  # {
+  #   n_cdf %>% plot(type = "l")
+  #   d_cdf %>% lines()
+  # }
+  sum((n_cdf - d_cdf)^2) / 10
+}) %>% list_c()
+
+cust_crps
+cust_crps %>% plot()
+max(cust_crps)
 ```
 
-# Winkler score
+```{r}
+quantiles <- seq(1, 100, 1)
+sr_crps <- map(quantiles, \(q) crps_pois(q)) %>%
+  list_c()
 
-# CRPS
+sr_crps <- crps_pois(quantiles, 46)
+
+# sr_crps
+max(sr_crps)
+min(sr_crps)
+{
+  (sr_crps / 500) %>% plot()
+  dpois(quantiles, 46) %>% lines()
+}
+```
