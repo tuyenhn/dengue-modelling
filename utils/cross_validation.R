@@ -13,7 +13,6 @@ rep_kfold_cv_glm <- function(formula, dataset, rep = 5, k = 5) {
   fits <- lapply(cv$train, \(data) glm(formula, family = "poisson", data = data))
 
   perfs <- furrr::future_map2(fits, cv$test, \(x, y){
-    library(modelr)
     preds <- boot_pi(x, newdata = y)
     boot_dists <- apply(preds$bootstrap, 2, \(b) dist_sample(list(b)))
     truths <- as.data.frame(y)$n
@@ -30,7 +29,7 @@ rep_kfold_cv_glm <- function(formula, dataset, rep = 5, k = 5) {
       # crps = mean(unlist(crps))
       pdf = pdf
     )
-  }, .options = furrr_options(seed = TRUE), .progress = TRUE) %>%
+  }, .options = furrr_options(seed = TRUE), .progress = TRUE, packages = "modelr") %>%
     as.data.frame() %>%
     t()
 

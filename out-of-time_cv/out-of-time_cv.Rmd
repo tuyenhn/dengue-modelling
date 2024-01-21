@@ -44,7 +44,7 @@ for (covar in covar_names) {
 incidence_ww_trunc_df %<>%
   filter_index("2004 W01" ~ "2019 W52") %>%
   as_tibble() %>%
-  mutate(week = isoweek(date_admitted), month = month(date_admitted)) %>%
+  mutate(week = isoweek(date_admitted), month = month(date_admitted), year = year(date_admitted)) %>%
   select(-date_admitted) %>%
   rowid_to_column()
 
@@ -54,7 +54,7 @@ incidence_ww_trunc_df
 ## Train test splitting
 
 ```{r}
-dat_split <- initial_split(incidence_ww_trunc_df)
+dat_split <- initial_split(incidence_ww_trunc_df, strata = year)
 train_dat <- training(dat_split)
 test_dat <- testing(dat_split)
 
