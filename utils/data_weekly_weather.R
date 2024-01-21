@@ -14,8 +14,8 @@ hcmc_shp <- read_rds("gadm/gadm41_VNM_1_pk.rds") %>%
 hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
 
 # # weather variables from ERA5
-# raw_weather <- read_ncdf("../L2_V3_T2m_RH_TP_SH_1999_2022.nc") %>%
-#   st_set_crs(4326)
+raw_weather <- read_ncdf("../TP_HB_SPI_corrected_L2.nc") %>%
+  st_set_crs(4326)
 # # SPI data
 # #  - Monthly SPI shows how wet/dry was the weather compared to the usual in the whole month
 # #  - Daily SPI shows how wet/dry was the weather compared to the usual using for the last 30 days

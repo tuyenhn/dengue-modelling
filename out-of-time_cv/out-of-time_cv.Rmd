@@ -180,8 +180,6 @@ dlm_perfs_df %>% ggplot(aes(y = value, x = name, color = name)) +
 ```
 
 
-
-
 ## Comparing
 
 ```{r}
@@ -194,6 +192,6 @@ all_perfs_df <- ar_perfs_df %>%
     dlm_perfs_df %>% mutate(from = "dlm")
   )
 
-all_perfs_df %>% ggplot() +
+all_perfs_df %>% filter(name == "pdf") %>% ggplot() +
   geom_boxplot(aes(x = name, y = value, fill = from))
 ```

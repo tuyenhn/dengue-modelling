@@ -20,11 +20,15 @@ rep_kfold_cv_glm <- function(formula, dataset, rep = 5, k = 5) {
     crps <- map2(truths, boot_dists, \(y, sample){
       crps_sample(y, parameters(sample)$x[[1]])
     })
+    pdf <- map2(boot_dists, truths, density) %>%
+      unlist() %>%
+      mean()
 
     c(
       rmse = yardstick::rmse_vec(truths, preds$preds),
       mae = yardstick::mae_vec(truths, preds$preds),
-      crps = mean(unlist(crps))
+      # crps = mean(unlist(crps))
+      pdf = pdf
     )
   }, .options = furrr_options(seed = TRUE), .progress = TRUE) %>%
     as.data.frame() %>%
