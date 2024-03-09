@@ -1,74 +1,56 @@
-# Library
-
-```{r message=FALSE, warning=FALSE}
+```{r}
 library(tidyverse)
-library(magrittr)
-library(patchwork)
-
-library(feasts)
-library(fable.prophet)
-library(fabletools)
-library(fable)
-
 library(tsibble)
-library(lubridate)
+library(rvg)
+library(officer)
+library(gganimate)
 
-library(tscount)
+theme_set(theme_light())
 ```
 
+
 ```{r}
-theme_set(theme_bw())
+incidence_full <- read_csv("../incidence_full.csv") %>%
+  mutate(week_admitted = yearweek(date_admitted))
+
+incidence_full
 ```
 
-# Data ingestion
 
-```{r}
-source("../utils/data_weekly.R", chdir = TRUE)
-train_weekly_df <- train_weekly_df %>% bind_rows(val_weekly_df)
-train_weekly_df %>% tail()
+```{r fig.width=10}
+p1_df <- incidence_full %>%
+  group_by(week_admitted) %>%
+  tally() %>%
+  mutate(frame = "p1")
+
+p1 <- p1_df %>%
+  ggplot() +
+  geom_step(aes(x = week_admitted, y = n)) +
+  scale_x_yearweek(
+    "Week admitted",
+    breaks = as.Date(as.character(2000:2023), format = "%Y"),
+    date_labels = "%Y"
+  ) +
+  scale_y_continuous("Case admission") +
+  ggtitle("Weekly dengue case admission in HCMC (out-patient + in-patient")
+p1
 ```
 
-# Base GLM
-```{r}
-poi_fit <- glm(n ~ date_admitted, family = "poisson", data = train_weekly_df)
-poi_fit
-```
+```{r fig.width=10}
+p2_df <- incidence_full %>%
+  filter(status == "in-patient") %>%
+  group_by(week_admitted) %>%
+  tally() %>%
+  mutate(frame = "p2")
 
-```{r}
-test_weekly_df %>%
-  head(4) %>%
-  mutate(
-    predicted = predict(poi_fit, newdata = test_weekly_df %>% head(4), type = "response")
-  )
-```
-
-# TSGLM
-
-```{r}
-poi_ts_fit <- tsglm(train_weekly_df$n, xreg = train_weekly_df$date_admitted, link = "log", distr = "poisson")
-poi_ts_fit
-```
-
-```{r}
-test_weekly_df %>%
-  head(4) %>%
-  mutate(predicted = predict(
-    poi_ts_fit,
-    n.ahead = 4,
-    newxreg = test_weekly_df %>%
-      head(4) %>%
-      pull(date_admitted)
-  )$pred)
-```
-
-# fable TSLM
-
-```{r}
-poi_fab_fit <- train_weekly_df %>%
-  model(TSLM(log(n) ~ date_admitted))
-report(poi_fab_fit)
-```
-
-```{r}
-poi_fab_fit %>% forecast(test_weekly_df %>% head(4))
+p2 <- p2_df %>%
+  ggplot() +
+  geom_step(aes(x = week_admitted, y = n)) +
+  scale_x_yearweek(
+    "Week admitted",
+    breaks = as.Date(as.character(2000:2023), format = "%Y"),
+    date_labels = "%Y"
+  ) +
+  scale_y_continuous("Case admission")
+p2
 ```

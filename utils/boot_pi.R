@@ -10,18 +10,21 @@ boot_pi <- function(model, newdata, boot_n = 1000, p = 0.95, type = "response") 
   lower_q <- (1 - p) / 2
   upper_q <- 1 - lower_q
 
+  set.seed(123)
   seeds <- round(runif(boot_n, 1, 1000), 0)
 
-  boot_y <- lapply(1:boot_n, \(i){
+  boot_y <- furrr::future_map(1:boot_n, \(i){
     set.seed(seeds[i])
     booted <- train_data[sample(seq(nrow(train_data)), size = nrow(train_data), replace = TRUE), ]
-    bpred <- predict(update(model, formula = model$formula, data = booted), type = type, newdata = newdata)
-    rpois(length(bpred), lambda = bpred)
-  }) %>% do.call(what = rbind)
+    predict(update(model, formula = model$formula, data = booted), type = type, newdata = newdata)
+  }, .options = furrr_options(seed = TRUE), .progress = TRUE) %>%
+    bind_rows()
+
+  # browser()
 
   set.seed(123) # reset seed to default
 
-  boot_ci <- t(apply(boot_y, 2, quantile, c(lower_q, upper_q)))
+  boot_ci <- t(apply(X = boot_y, MARGIN = 2, FUN = quantile, probs = c(lower_q, upper_q), na.rm = TRUE))
 
   # browser()
 

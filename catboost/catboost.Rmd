@@ -1,0 +1,34 @@
+---
+output: 
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: journal
+editor_options: 
+  chunk_output_type: inline
+---
+
+**Knitted at: `r Sys.time()`**
+
+# Libraries and functions
+```{r message=FALSE, warning=FALSE}
+setwd("~/dengue-modelling")
+
+.pkgs <- c("tidyverse", "magrittr", "catboost")
+xfun::pkg_attach(.pkgs, message = FALSE)
+```
+
+# Settings
+```{r}
+theme_set(theme_bw())
+```
+
+# Data ingestion
+```{r}
+incidence_weekly_weather_df <- read_rds("~/dengue-modelling/utils/data_weekly_rds-s/incidence_weekly_weather_df.rds")
+```
+
+```{r}
+
+```
+

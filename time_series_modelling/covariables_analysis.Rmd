@@ -8,27 +8,22 @@ output:
     theme: journal
 ---
 
+```{r setup}
+knitr::opts_knit$set(root.dir = "/home/tuyenhn-wsl/dengue-modelling")
+```
+
+
 # Library
 
 ```{r}
-library(sf)
-library(stars)
-library(tscount)
-library(distributional)
-library(parallel)
-library(pbapply)
-library(GGally)
-library(modelr)
-library(distributional)
-library(scoringRules)
-library(future)
-library(furrr)
+.pkgs <- c("sf", "stars", "rsample", "future", "furrr", "modelr", "distributional", "GGally")
+xfun::pkg_attach(.pkgs, message = FALSE)
 
-source("../utils/data_weekly.R", chdir = TRUE)
-source("../utils/covar_fns.R", chdir = TRUE)
-source("../utils/regression_recur_miso.R", chdir = TRUE)
-source("../utils/performance_checking_framework.R", chdir = TRUE)
-source("../utils/cross_validation.R", chdir = TRUE)
+source("utils/data_weekly.R", chdir = TRUE)
+source("utils/data_weekly_weather.R", chdir = TRUE)
+source("utils/covar_fns.R")
+source("utils/cross_validation.R")
+source("utils/boot_pi.R")
 
 set.seed(123)
 ```
@@ -63,11 +58,6 @@ plot_covar(hcmc_rh_df, "Relative Humidity (%)", "Weekly mean relative humidity -
 ggsave("./svgs/weekly_rh_ts.svg", width = 10, height = 7)
 
 hist(hcmc_rh_df$rh)
-```
-
-
-```{r}
-incidence_weekly_weather_df
 ```
 
 ## Specific humidity
@@ -180,6 +170,7 @@ hist(hcmc_mx_mnsh24_df$mxsh24)
 
 ## Standardized Precipitation Index 
 Daily SPI shows how wet/dry was the weather compared to the usual using for the last 30 days. Data is aggregated to weekly using averaging.
+(Monthly SPI shows how wet/dry was the weather compared to the usual in the whole month)
 
 ```{r}
 plot_covar(
@@ -195,6 +186,23 @@ ggsave("./svgs/weekly_spi_ts.svg", width = 10, height = 7)
 hist(hcmc_spi_df$spi_daily)
 ```
 
+## Standardized Precipitation-Evaporation Index  
+It is almost the same as the SPI, but including the evaporation in the index. The information that this variable gives is the same as SPI (How humid/dry is the weather conditions compare to the usual conditions)
+
+```{r}
+plot_covar(
+  hcmc_spei_df, "Average SPEI", "Weekly mean SPEI",
+  layer(
+    geom = "hline", stat = "identity", position = "identity",
+    params = list(yintercept = 0, color = "red", linetype = "dashed")
+  )
+)
+
+ggsave("./svgs/weekly_spei_ts.svg", width = 10, height = 7)
+
+hist(hcmc_spei_df$spei_daily)
+```
+
 
 # Covariable individual performance
 
@@ -202,12 +210,13 @@ hist(hcmc_spi_df$spi_daily)
 incidence_ww_trunc_df <- calculate_lags(incidence_weekly_weather_df, "n", 1) %>%
   filter_index("2004 W01" ~ "2019 W52") %>%
   as_tibble() %>%
-  mutate(week = isoweek(date_admitted), month = month(date_admitted)) %>%
+  mutate(year = year(date_admitted)) %>%
   select(-date_admitted) %>%
   rowid_to_column()
 
-train_dat <- incidence_ww_trunc_df %>% sample_frac(.75)
-test_dat <- anti_join(incidence_ww_trunc_df, train_dat, by = "rowid")
+dat_split <- initial_split(incidence_ww_trunc_df, prop = 3 / 4, strata = year)
+train_dat <- training(dat_split)
+test_dat <- testing(dat_split)
 
 covar_names <- incidence_weekly_weather_df %>%
   as_tibble() %>%
@@ -218,12 +227,14 @@ covar_names
 
 
 ```{r}
-plan(multisession, workers = 7)
+plan(multisession, workers = 8)
 
 covar_cv_perfs <- future_map(
   covar_names, \(covar) rep_kfold_cv_covar(train_dat, covar),
   .options = furrr_options(seed = TRUE), .progress = TRUE
-) %>% list_c()
+) %>%
+  list_c() %>%
+  mutate(covar = str_split_i(model, "w/", 2), .after = model)
 
 plan(sequential)
 ```
@@ -232,15 +243,15 @@ plan(sequential)
 covar_cv_perfs
 ```
 
-
 ```{r}
 covar_cv_perfs %>%
-  pivot_longer(-model) %>%
+  select(-model) %>%
+  pivot_longer(-covar) %>%
   unnest(value) %>%
-  group_by(name, model) %>%
+  group_by(name, covar) %>%
   mutate(group = dense_rank(value)) %>%
-  arrange(model) %>%
-  ggplot(aes(x = value, y = model, color = name)) +
+  arrange(covar) %>%
+  ggplot(aes(x = value, y = covar, color = name)) +
   geom_point(alpha = 0.9) +
   geom_path(aes(group = group), alpha = 0.9) +
   stat_summary(
@@ -272,7 +283,7 @@ incidence_weekly_weather_df %>%
   drop_na() %>%
   mutate(n = log(n)) %>%
   ggpairs(
-    columns = 2:15,
+    columns = 2:17,
     lower = list(continuous = wrap("density", alpha = 0.5)),
     progress = FALSE
   )

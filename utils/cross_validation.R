@@ -14,12 +14,13 @@ rep_kfold_cv_glm <- function(formula, dataset, rep = 5, k = 5) {
 
   perfs <- furrr::future_map2(fits, cv$test, \(x, y){
     preds <- boot_pi(x, newdata = y)
+    # browser()
     boot_dists <- apply(preds$bootstrap, 2, \(b) dist_sample(list(b)))
     truths <- as.data.frame(y)$n
-    crps <- map2(truths, boot_dists, \(y, sample){
-      crps_sample(y, parameters(sample)$x[[1]])
-    })
-    pdf <- map2(boot_dists, truths, density) %>%
+    # crps <- map2(truths, boot_dists, \(y, sample){
+    #   crps_sample(y, parameters(sample)$x[[1]])
+    # })
+    mean_prob <- map2(boot_dists, truths, stats::density) %>%
       unlist() %>%
       mean()
 
@@ -27,9 +28,9 @@ rep_kfold_cv_glm <- function(formula, dataset, rep = 5, k = 5) {
       rmse = yardstick::rmse_vec(truths, preds$preds),
       mae = yardstick::mae_vec(truths, preds$preds),
       # crps = mean(unlist(crps))
-      pdf = pdf
+      mean_prob = mean_prob
     )
-  }, .options = furrr_options(seed = TRUE), .progress = TRUE, packages = "modelr") %>%
+  }, .options = furrr_options(seed = TRUE, packages = "modelr"), .progress = TRUE) %>%
     as.data.frame() %>%
     t()
 

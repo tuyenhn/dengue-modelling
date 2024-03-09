@@ -1,0 +1,402 @@
+---
+output: 
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: journal
+editor_options: 
+  chunk_output_type: inline
+---
+
+**Knitted at: `r Sys.time()`**
+
+# Libraries and functions
+```{r message=FALSE, warning=FALSE}
+setwd("~/dengue-modelling")
+
+.pkgs <- c("tidyverse", "magrittr", "rsample", "tsibble", "modelr", "furrr", "distributional", "scoringRules", "patchwork")
+xfun::pkg_attach(.pkgs, message = FALSE)
+
+source("utils/cross_validation.R")
+source("utils/boot_pi.R")
+```
+
+# Settings
+```{r}
+theme_set(theme_bw())
+```
+
+# Data ingestion
+
+```{r}
+incidence_weekly_weather_df <- read_rds("~/dengue-modelling/utils/data_weekly_rds-s/incidence_weekly_weather_df.rds")
+```
+
+## Feature engineering
+
+```{r}
+incidence_ww_trunc_df <- incidence_weekly_weather_df
+covar_names <- incidence_ww_trunc_df %>%
+  as_tibble() %>%
+  select(-c(date_admitted, n)) %>%
+  colnames()
+
+# 3 months incidence lag
+incidence_ww_trunc_df %<>% calculate_lags("n", 1:12)
+for (covar in covar_names) {
+  incidence_ww_trunc_df %<>% calculate_lags(covar, 1:12)
+}
+
+# truncate date, remove temporal data
+incidence_ww_trunc_df %<>%
+  filter_index("2004 W01" ~ "2019 W52") %>%
+  as_tibble() %>%
+  mutate(week = isoweek(date_admitted), month = month(date_admitted), year = year(date_admitted)) %>%
+  select(-date_admitted) %>%
+  rowid_to_column()
+
+incidence_ww_trunc_df
+```
+
+## Train test splitting
+
+```{r}
+set.seed(123)
+dat_split <- initial_split(incidence_ww_trunc_df, prop = 3 / 4, strata = week)
+train_dat <- training(dat_split)
+test_dat <- testing(dat_split)
+
+ggplot(mapping = aes(x = rowid, y = n)) +
+  geom_point(data = train_dat, alpha = 0.8) +
+  geom_point(data = test_dat, color = "red", alpha = 0.8) +
+  scale_x_continuous("Time index") +
+  scale_y_continuous("Incidence")
+```
+
+
+# Modelling
+
+## Parallelization setup
+```{r}
+plan(multisession, workers = 8)
+```
+
+
+## Autoregression
+```{r}
+ar_formula <- as.formula(paste0("n ~ ", paste("n_lag", 1:12, sep = "", collapse = " + ")))
+
+ar_perfs <- rep_kfold_cv_glm(ar_formula, train_dat)
+```
+
+```{r}
+ar_perfs_df <- ar_perfs %>%
+  as_tibble() %>%
+  mutate(rep = rep(seq_len(5), each = 5), k = rep(1:5, 5), .before = everything()) %>%
+  pivot_longer(-c(rep, k))
+```
+
+```{r}
+ar_perfs_df %>%
+  ggplot(aes(y = value, x = rep, color = name)) +
+  geom_point() +
+  stat_summary(
+    fun = mean, geom = "errorbar", color = "black",
+    aes(ymax = after_stat(y), ymin = after_stat(y), width = 0.5)
+  ) +
+  facet_wrap(~name, scales = "free_y") +
+  scale_x_continuous("Repetitions", minor_breaks = NULL) +
+  scale_y_continuous("Value") +
+  guides(color = "none")
+```
+
+```{r}
+ar_perfs_df %>%
+  ggplot(aes(y = value, x = name, color = name)) +
+  geom_boxplot() +
+  # geom_jitter(width = 0.2) +
+  # geom_point(color = "black") +
+  guides(color = "none") +
+  scale_x_discrete("Metrics", breaks = NULL) +
+  scale_y_continuous("Value") +
+  facet_wrap(~name, scales = "free")
+```
+
+## All covariables
+
+```{r}
+covar_formula <- as.formula(paste0("n ~ ", paste(covar_names, collapse = " + ")))
+
+covar_perfs <- rep_kfold_cv_glm(covar_formula, train_dat)
+```
+
+```{r}
+covar_perfs_df <- covar_perfs %>%
+  as_tibble() %>%
+  mutate(rep = rep(seq_len(5), each = 5), k = rep(1:5, 5), .before = everything()) %>%
+  pivot_longer(-c(rep, k))
+# covar_perfs_df
+```
+
+```{r}
+covar_perfs_df %>%
+  ggplot(aes(y = value, x = rep, color = name)) +
+  geom_point() +
+  stat_summary(
+    fun = mean, geom = "errorbar", color = "black",
+    aes(ymax = after_stat(y), ymin = after_stat(y), width = 0.5)
+  ) +
+  facet_wrap(~name, scales = "free_y") +
+  scale_x_continuous("Repetitions", minor_breaks = NULL) +
+  scale_y_continuous("Value") +
+  guides(color = "none")
+```
+
+```{r}
+covar_perfs_df %>% ggplot(aes(y = value, x = name, color = name)) +
+  geom_boxplot() +
+  # geom_jitter(width = 0.2) +
+  # geom_point() +
+  guides(color = "none") +
+  scale_x_discrete("Metrics", breaks = NULL) +
+  scale_y_continuous("Value") +
+  facet_wrap(~name, scales = "free")
+```
+
+## All lagged covariables (distributed lag model)
+
+```{r}
+dlm_covar_names <- colnames(
+  incidence_ww_trunc_df %>%
+    select(-c(rowid, n, week, month, year), -starts_with("n"))
+)
+dlm_formula <- as.formula(paste0("n ~ ", paste(dlm_covar_names, collapse = " + ")))
+
+dlm_perfs <- rep_kfold_cv_glm(dlm_formula, train_dat)
+```
+
+```{r}
+dlm_perfs_df <- dlm_perfs %>%
+  as_tibble() %>%
+  mutate(rep = rep(seq_len(5), each = 5), k = rep(1:5, 5), .before = everything()) %>%
+  pivot_longer(-c(rep, k))
+# dlm_perfs_df
+```
+
+```{r}
+dlm_perfs_df %>%
+  ggplot(aes(y = value, x = rep, color = name)) +
+  geom_point() +
+  stat_summary(
+    fun = mean, geom = "errorbar", color = "black",
+    aes(ymax = after_stat(y), ymin = after_stat(y), width = 0.5)
+  ) +
+  facet_wrap(~name, scales = "free_y") +
+  scale_x_continuous("Repetitions", minor_breaks = NULL) +
+  scale_y_continuous("Value") +
+  guides(color = "none")
+```
+
+```{r}
+dlm_perfs_df %>% ggplot(aes(y = value, x = name, color = name)) +
+  geom_boxplot() +
+  # geom_jitter(width = 0.2) +
+  # geom_point() +
+  guides(color = "none") +
+  scale_x_discrete("Metrics", breaks = NULL) +
+  scale_y_continuous("Value") +
+  facet_wrap(~name, scales = "free")
+```
+
+## AR + DLM
+
+```{r}
+ar_dlm_covar_names <- colnames(
+  incidence_ww_trunc_df %>%
+    select(-c(rowid, n, week, month, year))
+)
+ar_dlm_formula <- as.formula(paste0("n ~ ", paste(ar_dlm_covar_names, collapse = " + ")))
+
+ar_dlm_perfs <- rep_kfold_cv_glm(ar_dlm_formula, train_dat)
+```
+
+```{r}
+ar_dlm_perfs_df <- ar_dlm_perfs %>%
+  as_tibble() %>%
+  mutate(rep = rep(seq_len(5), each = 5), k = rep(1:5, 5), .before = everything()) %>%
+  pivot_longer(-c(rep, k))
+# ar_dlm_perfs_df
+```
+
+```{r}
+ar_dlm_perfs_df %>%
+  ggplot(aes(y = value, x = rep, color = name)) +
+  geom_point() +
+  stat_summary(
+    fun = mean, geom = "errorbar", color = "black",
+    aes(ymax = after_stat(y), ymin = after_stat(y), width = 0.5)
+  ) +
+  facet_wrap(~name, scales = "free_y") +
+  scale_x_continuous("Repetitions", minor_breaks = NULL) +
+  scale_y_continuous("Value") +
+  guides(color = "none")
+```
+
+```{r}
+ar_dlm_perfs_df %>% ggplot(aes(y = value, x = name, color = name)) +
+  geom_boxplot() +
+  # geom_jitter(width = 0.2) +
+  # geom_point() +
+  guides(color = "none") +
+  scale_x_discrete("Metrics", breaks = NULL) +
+  scale_y_continuous("Value") +
+  facet_wrap(~name, scales = "free")
+```
+
+
+## Comparing
+
+```{r}
+all_perfs_df <- ar_perfs_df %>%
+  mutate(model = "ar") %>%
+  bind_rows(
+    covar_perfs_df %>% mutate(model = "covar")
+  ) %>%
+  bind_rows(
+    dlm_perfs_df %>% mutate(model = "dlm")
+  ) %>%
+  bind_rows(
+    ar_dlm_perfs_df %>% mutate(model = "ar_dlm")
+  )
+
+all_perfs_df %>%
+  ggplot() +
+  geom_boxplot(aes(x = name, y = value, fill = model)) +
+  scale_x_discrete("Metric", breaks = NULL) +
+  scale_y_continuous("Value") +
+  facet_wrap(~name, scales = "free", strip.position = "bottom")
+```
+
+# Model testing
+
+```{r}
+cand_model <- glm(ar_dlm_formula, family = "poisson", data = train_dat)
+
+cand_model_preds <- boot_pi(cand_model, newdata = test_dat, p = 0.95)
+```
+
+```{r}
+boot_dists <- apply(cand_model_preds$bootstrap, 2, \(b) dist_sample(list(b)))
+# mean_prob <- map2(boot_dists, test_dat$n, stats::density) %>%
+#   unlist() %>%
+#   mean()
+# rmse <- yardstick::rmse_vec(test_dat$n, cand_model_preds$preds)
+# mae <- yardstick::mae_vec(test_dat$n, cand_model_preds$preds)
+```
+
+```{r}
+cand_model_preds_df <- tibble(
+  id = 1:length(cand_model_preds$preds),
+  preds = cand_model_preds$preds,
+  truths = test_dat$n,
+  week = test_dat$week,
+  month = test_dat$month,
+  year = test_dat$year,
+  lowers_95pi = cand_model_preds$lowers,
+  uppers_95pi = cand_model_preds$uppers,
+  dists = boot_dists
+)
+```
+
+## Accuracy evaluation
+```{r}
+truths_in_pi <- cand_model_preds_df %>%
+  mutate(in_pi = between(truths, lowers_95pi, uppers_95pi))
+
+sum(truths_in_pi$in_pi) / nrow(truths_in_pi)
+```
+
+### as a function of PI width
+```{r}
+acc_by_pi_width <- future_map((1:100 / 100), function(w) {
+  truths <- test_dat$n
+  boot_y <- cand_model_preds$bootstrap
+  lower_q <- (1 - w) / 2
+  upper_q <- 1 - lower_q
+
+  boot_ci <- t(apply(X = boot_y, MARGIN = 2, FUN = quantile, probs = c(lower_q, upper_q), na.rm = TRUE))
+
+  lowers <- boot_ci[, 1]
+  uppers <- boot_ci[, 2]
+
+  in_pi <- between(truths, lowers, uppers)
+
+  tibble(
+    pi_width = w,
+    acc = sum(in_pi) / length(in_pi)
+  )
+}) %>% list_c()
+
+acc_by_pi_width %>% ggplot() +
+  geom_point(aes(x = pi_width, y = acc), shape = 1) +
+  geom_abline()
+```
+
+
+## Metrics figures
+```{r}
+cand_model_preds_df %>%
+  ggplot(aes(x = id)) +
+  geom_pointrange(aes(y = preds, ymin = lowers_95pi, ymax = uppers_95pi), color = "red", alpha = 0.5) +
+  geom_point(aes(y = truths)) +
+  scale_x_continuous("Point index") +
+  scale_y_continuous("Prediction and 95% PI")
+```
+
+```{r}
+cand_model_preds_df %>%
+  ggplot(aes(x = week)) +
+  geom_pointrange(aes(y = preds, ymin = lowers_95pi, ymax = uppers_95pi), color = "red", alpha = 0.5) +
+  geom_point(aes(y = truths)) +
+  scale_y_continuous("Prediction and 95% PI") +
+  scale_x_continuous("Week index", breaks = seq(0, 52, 4))
+```
+
+```{r fig.height=5}
+cand_model_perf_weekly <- cand_model_preds_df %>%
+  group_by(week) %>%
+  summarise(
+    mean_prob = map2(dists, truths, stats::density) %>%
+      unlist() %>%
+      mean(),
+    rmse = yardstick::rmse_vec(truths, preds),
+    mae = yardstick::mae_vec(truths, preds)
+  )
+
+# cand_model_perf_weekly %>%
+#   pivot_longer(-week) %>%
+#   ggplot(aes(x = week)) +
+#   geom_col(aes(y = value, fill = value)) +
+#   facet_wrap(~name, ncol = 1, scales = "free_y") +
+#   scale_fill_gradient(low = "green", high = "red") +
+#   scale_x_continuous("Week index", breaks = seq(0, 52, 4)) +
+#   scale_y_continuous("Value")
+
+plot_factory <- function(metric_name, y_ax_name, low_col, high_col) {
+  cand_model_perf_weekly %>%
+    select(week, {{ metric_name }}) %>%
+    ggplot(aes(x = week, y = {{ metric_name }})) +
+    geom_col(aes(fill = {{ metric_name }})) +
+    scale_fill_gradient(low = low_col, high = high_col) +
+    scale_x_continuous("Week index", breaks = seq(0, 52, 4)) +
+    scale_y_continuous(y_ax_name) +
+    guides(fill = "none")
+}
+
+p1_mean_prob <- plot_factory(mean_prob, "Mean probabilities", "red", "green")
+p2_rmse <- plot_factory(rmse, "RMSE", "green", "red")
+p3_mae <- plot_factory(mae, "MAE", "green", "red")
+
+(p1_mean_prob + ggtitle("Model metrics aggregated by week of incidence")) / p2_rmse / p3_mae +
+  plot_layout(axes = "collect")
+```
