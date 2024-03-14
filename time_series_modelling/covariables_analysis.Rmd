@@ -35,7 +35,7 @@ set.seed(123)
 ```{r}
 plot_covar(hcmc_temp_df, "Temperature (°C)", "Weekly mean 2m temperature - ERA5 reanalysis")
 
-ggsave("./svgs/weekly_t2m_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_t2m_ts.svg", width = 10, height = 7)
 
 hist(hcmc_temp_df$t2m)
 ```
@@ -45,7 +45,7 @@ hist(hcmc_temp_df$t2m)
 ```{r}
 plot_covar(hcmc_precip_df, "Precipitation (mm)", "Weekly total precipitation ERA5 - reanalysis")
 
-ggsave("./svgs/weekly_precip_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_precip_ts.svg", width = 10, height = 7)
 
 hist(hcmc_precip_df$precip)
 ```
@@ -55,7 +55,7 @@ hist(hcmc_precip_df$precip)
 ```{r}
 plot_covar(hcmc_rh_df, "Relative Humidity (%)", "Weekly mean relative humidity - ERA5 reanalysis")
 
-ggsave("./svgs/weekly_rh_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_rh_ts.svg", width = 10, height = 7)
 
 hist(hcmc_rh_df$rh)
 ```
@@ -64,7 +64,7 @@ hist(hcmc_rh_df$rh)
 ```{r}
 plot_covar(hcmc_sh_df, "Specific Humidity (g/kg)", "Weekly mean specific humidity - ERA5 reanalysis")
 
-ggsave("./svgs/weekly_sh_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_sh_ts.svg", width = 10, height = 7)
 
 hist(hcmc_sh_df$sh)
 ```
@@ -77,7 +77,7 @@ plot_covar(
   "Weekly mean wind speed intensity - ERA5 reanalysis"
 )
 
-ggsave("./svgs/weekly_ws_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_ws_ts.svg", width = 10, height = 7)
 
 hist(hcmc_ws_df$ws)
 ```
@@ -97,7 +97,7 @@ plot_covar(
   )
 )
 
-ggsave("./svgs/weekly_hb_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_hb_ts.svg", width = 10, height = 7)
 
 hist(hcmc_hb_df$hb)
 ```
@@ -112,7 +112,7 @@ plot_covar(
   "Weekly total accumulated solar radiation downwards - ERA5 reanalysis"
 )
 
-ggsave("./svgs/weekly_ssdr_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_ssdr_ts.svg", width = 10, height = 7)
 
 hist(hcmc_ssdr_df$ssdr)
 ```
@@ -128,7 +128,7 @@ plot_covar(
   color = name
 )
 
-ggsave("./svgs/weekly_mx_mn2t24_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_mx_mn2t24_ts.svg", width = 10, height = 7)
 
 hist(hcmc_mx_mn2t24_df$mn2t24)
 hist(hcmc_mx_mn2t24_df$mx2t24)
@@ -145,7 +145,7 @@ plot_covar(
   color = name
 )
 
-ggsave("./svgs/weekly_mx_mnrh24_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_mx_mnrh24_ts.svg", width = 10, height = 7)
 
 hist(hcmc_mx_mnrh24_df$mnrh24)
 hist(hcmc_mx_mnrh24_df$mxrh24)
@@ -162,7 +162,7 @@ plot_covar(
   color = name, alpha = 0.9
 )
 
-ggsave("./svgs/weekly_mx_mnsh24_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_mx_mnsh24_ts.svg", width = 10, height = 7)
 
 hist(hcmc_mx_mnsh24_df$mnsh24)
 hist(hcmc_mx_mnsh24_df$mxsh24)
@@ -181,7 +181,7 @@ plot_covar(
   )
 )
 
-ggsave("./svgs/weekly_spi_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_spi_ts.svg", width = 10, height = 7)
 
 hist(hcmc_spi_df$spi_daily)
 ```
@@ -198,7 +198,7 @@ plot_covar(
   )
 )
 
-ggsave("./svgs/weekly_spei_ts.svg", width = 10, height = 7)
+# ggsave("svgs/weekly_spei_ts.svg", width = 10, height = 7)
 
 hist(hcmc_spei_df$spei_daily)
 ```
@@ -289,12 +289,12 @@ incidence_weekly_weather_df %>%
   )
 ```
 
-```{r fig.height=10, fig.width=10}
+```{r fig.height=15, fig.width=15}
 incidence_weekly_weather_df %>%
   drop_na() %>%
   mutate(n = log(n)) %>%
   ggpairs(
-    columns = 2:15,
+    columns = 2:17,
     lower = list(continuous = wrap("points", alpha = 0.1)),
     progress = FALSE
   )

@@ -12,7 +12,8 @@ hcmc_shp_w_buff <- st_buffer(hcmc_shp, units::set_units(10, "km"))
 ## weather variables from ERA5
 raw_weather <- read_ncdf("weather_data/L2_V7_T2m_RH_TP_SH_2003_2019.nc") %>%
   st_set_crs(4326) %>%
-  filter(time >= as.Date("2002-12-31"), time <= as.Date("2019-12-31"))
+  filter(time >= as.Date("2002-12-31"), time <= as.Date("2019-12-31")) %>%
+  st_crop(hcmc_shp_w_buff)
 
 raw_weather %>% write_rds("data_weekly_rds-s/raw_weather.rds")
 

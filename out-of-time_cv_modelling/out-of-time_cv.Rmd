@@ -34,6 +34,7 @@ incidence_weekly_weather_df <- read_rds("~/dengue-modelling/utils/data_weekly_rd
 
 ## Feature engineering
 
+### Lagging
 ```{r}
 incidence_ww_trunc_df <- incidence_weekly_weather_df
 covar_names <- incidence_ww_trunc_df %>%
@@ -58,6 +59,12 @@ incidence_ww_trunc_df %<>%
 incidence_ww_trunc_df
 ```
 
+### Serotype and population susceptibility
+
+```{r}
+```
+
+
 ## Train test splitting
 
 ```{r}
@@ -78,9 +85,8 @@ ggplot(mapping = aes(x = rowid, y = n)) +
 
 ## Parallelization setup
 ```{r}
-plan(multisession, workers = 8)
+plan(multisession, workers = 10)
 ```
-
 
 ## Autoregression
 ```{r}
@@ -298,6 +304,7 @@ boot_dists <- apply(cand_model_preds$bootstrap, 2, \(b) dist_sample(list(b)))
 cand_model_preds_df <- tibble(
   id = 1:length(cand_model_preds$preds),
   preds = cand_model_preds$preds,
+  poi_modes = floor(preds),
   truths = test_dat$n,
   week = test_dat$week,
   month = test_dat$month,
@@ -342,12 +349,16 @@ acc_by_pi_width %>% ggplot() +
   geom_abline()
 ```
 
+### Coefficient of variation
+```{r}
+```
+
 
 ## Metrics figures
 ```{r}
 cand_model_preds_df %>%
   ggplot(aes(x = id)) +
-  geom_pointrange(aes(y = preds, ymin = lowers_95pi, ymax = uppers_95pi), color = "red", alpha = 0.5) +
+  geom_pointrange(aes(y = poi_modes, ymin = lowers_95pi, ymax = uppers_95pi), color = "red", alpha = 0.5) +
   geom_point(aes(y = truths)) +
   scale_x_continuous("Point index") +
   scale_y_continuous("Prediction and 95% PI")
@@ -356,7 +367,7 @@ cand_model_preds_df %>%
 ```{r}
 cand_model_preds_df %>%
   ggplot(aes(x = week)) +
-  geom_pointrange(aes(y = preds, ymin = lowers_95pi, ymax = uppers_95pi), color = "red", alpha = 0.5) +
+  geom_pointrange(aes(y = poi_modes, ymin = lowers_95pi, ymax = uppers_95pi), color = "red", alpha = 0.5) +
   geom_point(aes(y = truths)) +
   scale_y_continuous("Prediction and 95% PI") +
   scale_x_continuous("Week index", breaks = seq(0, 52, 4))

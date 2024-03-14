@@ -14,21 +14,28 @@ rep_kfold_cv_glm <- function(formula, dataset, rep = 5, k = 5) {
 
   perfs <- furrr::future_map2(fits, cv$test, \(x, y){
     preds <- boot_pi(x, newdata = y)
-    # browser()
+    poi_modes <- floor(preds$preds)
     boot_dists <- apply(preds$bootstrap, 2, \(b) dist_sample(list(b)))
     truths <- as.data.frame(y)$n
+
+    cred_ints <- map2(truths, preds$bootstrap, \(gt, b) {
+      ecdfx <- ecdf(b)
+      2 * abs(0.5 - ecdfx(gt))
+    })
+
+    # mean_prob <- map2(boot_dists, truths, stats::density) %>%
+    #   unlist() %>%
+    #   mean()
     # crps <- map2(truths, boot_dists, \(y, sample){
     #   crps_sample(y, parameters(sample)$x[[1]])
     # })
-    mean_prob <- map2(boot_dists, truths, stats::density) %>%
-      unlist() %>%
-      mean()
 
     c(
-      rmse = yardstick::rmse_vec(truths, preds$preds),
-      mae = yardstick::mae_vec(truths, preds$preds),
+      rmse = yardstick::rmse_vec(truths, poi_modes),
+      mae = yardstick::mae_vec(truths, poi_modes),
+      mean_cis = cred_ints |> unlist() |> mean()
+      # mean_prob = mean_prob
       # crps = mean(unlist(crps))
-      mean_prob = mean_prob
     )
   }, .options = furrr_options(seed = TRUE, packages = "modelr"), .progress = TRUE) %>%
     as.data.frame() %>%
