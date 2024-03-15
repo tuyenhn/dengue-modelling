@@ -98,8 +98,14 @@ ar_perfs <- rep_kfold_cv_glm(ar_formula, train_dat)
 ```{r}
 ar_perfs_df <- ar_perfs %>%
   as_tibble() %>%
-  mutate(rep = rep(seq_len(5), each = 5), k = rep(1:5, 5), .before = everything()) %>%
-  pivot_longer(-c(rep, k))
+  rename(mean_pis = mean_cis) %>%
+  mutate(
+    rep = rep(seq_len(5), each = 5),
+    k = rep(1:5, 5),
+    .before = everything()
+  ) %>%
+  pivot_longer(-c(rep, k)) %>%
+  mutate(name = factor(name, c("mae", "rmse", "mean_pis")))
 ```
 
 ```{r}
@@ -139,8 +145,14 @@ covar_perfs <- rep_kfold_cv_glm(covar_formula, train_dat)
 ```{r}
 covar_perfs_df <- covar_perfs %>%
   as_tibble() %>%
-  mutate(rep = rep(seq_len(5), each = 5), k = rep(1:5, 5), .before = everything()) %>%
-  pivot_longer(-c(rep, k))
+  rename(mean_pis = mean_cis) %>%
+  mutate(
+    rep = rep(seq_len(5), each = 5),
+    k = rep(1:5, 5),
+    .before = everything()
+  ) %>%
+  pivot_longer(-c(rep, k)) %>%
+  mutate(name = factor(name, c("mae", "rmse", "mean_pis")))
 # covar_perfs_df
 ```
 
@@ -184,8 +196,14 @@ dlm_perfs <- rep_kfold_cv_glm(dlm_formula, train_dat)
 ```{r}
 dlm_perfs_df <- dlm_perfs %>%
   as_tibble() %>%
-  mutate(rep = rep(seq_len(5), each = 5), k = rep(1:5, 5), .before = everything()) %>%
-  pivot_longer(-c(rep, k))
+  rename(mean_pis = mean_cis) %>%
+  mutate(
+    rep = rep(seq_len(5), each = 5),
+    k = rep(1:5, 5),
+    .before = everything()
+  ) %>%
+  pivot_longer(-c(rep, k)) %>%
+  mutate(name = factor(name, c("mae", "rmse", "mean_pis")))
 # dlm_perfs_df
 ```
 
@@ -229,8 +247,14 @@ ar_dlm_perfs <- rep_kfold_cv_glm(ar_dlm_formula, train_dat)
 ```{r}
 ar_dlm_perfs_df <- ar_dlm_perfs %>%
   as_tibble() %>%
-  mutate(rep = rep(seq_len(5), each = 5), k = rep(1:5, 5), .before = everything()) %>%
-  pivot_longer(-c(rep, k))
+  rename(mean_pis = mean_cis) %>%
+  mutate(
+    rep = rep(seq_len(5), each = 5),
+    k = rep(1:5, 5),
+    .before = everything()
+  ) %>%
+  pivot_longer(-c(rep, k)) %>%
+  mutate(name = factor(name, c("mae", "rmse", "mean_pis")))
 # ar_dlm_perfs_df
 ```
 
@@ -273,7 +297,8 @@ all_perfs_df <- ar_perfs_df %>%
   ) %>%
   bind_rows(
     ar_dlm_perfs_df %>% mutate(model = "ar_dlm")
-  )
+  ) %>%
+  mutate(model = factor(model, c("ar", "ar_dlm", "dlm", "covar")))
 
 all_perfs_df %>%
   ggplot() +
@@ -346,7 +371,9 @@ acc_by_pi_width <- future_map((1:100 / 100), function(w) {
 
 acc_by_pi_width %>% ggplot() +
   geom_point(aes(x = pi_width, y = acc), shape = 1) +
-  geom_abline()
+  geom_abline() +
+  scale_y_continuous("Accuracy") +
+  scale_x_continuous("PI width")
 ```
 
 ### Coefficient of variation
@@ -367,7 +394,14 @@ cand_model_preds_df %>%
 ```{r}
 cand_model_preds_df %>%
   ggplot(aes(x = week)) +
-  geom_pointrange(aes(y = poi_modes, ymin = lowers_95pi, ymax = uppers_95pi), color = "red", alpha = 0.5) +
+  geom_pointrange(
+    aes(
+      y = poi_modes,
+      ymin = lowers_95pi,
+      ymax = uppers_95pi
+    ),
+    color = "red", alpha = 0.5
+  ) +
   geom_point(aes(y = truths)) +
   scale_y_continuous("Prediction and 95% PI") +
   scale_x_continuous("Week index", breaks = seq(0, 52, 4))
@@ -377,13 +411,17 @@ cand_model_preds_df %>%
 cand_model_perf_weekly <- cand_model_preds_df %>%
   group_by(week) %>%
   summarise(
-    mean_prob = map2(dists, truths, stats::density) %>%
-      unlist() %>%
-      mean(),
+    # mean_prob = map2(dists, truths, stats::density) %>%
+    #   unlist() %>%
+    #   mean(),
+    mean_pis = map2(truths, dists, ~ 2 * abs(0.5 - cdf(.y, .x))) %>% unlist() %>% mean(),
     rmse = yardstick::rmse_vec(truths, preds),
     mae = yardstick::mae_vec(truths, preds)
   )
+```
 
+
+```{r fig.height=5}
 # cand_model_perf_weekly %>%
 #   pivot_longer(-week) %>%
 #   ggplot(aes(x = week)) +
@@ -404,7 +442,7 @@ plot_factory <- function(metric_name, y_ax_name, low_col, high_col) {
     guides(fill = "none")
 }
 
-p1_mean_prob <- plot_factory(mean_prob, "Mean probabilities", "red", "green")
+p1_mean_prob <- plot_factory(mean_pis, "Mean PIs", "green", "red")
 p2_rmse <- plot_factory(rmse, "RMSE", "green", "red")
 p3_mae <- plot_factory(mae, "MAE", "green", "red")
 

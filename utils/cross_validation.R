@@ -18,7 +18,7 @@ rep_kfold_cv_glm <- function(formula, dataset, rep = 5, k = 5) {
     boot_dists <- apply(preds$bootstrap, 2, \(b) dist_sample(list(b)))
     truths <- as.data.frame(y)$n
 
-    cred_ints <- map2(truths, preds$bootstrap, \(gt, b) {
+    pred_ints <- map2(truths, preds$bootstrap, \(gt, b) {
       ecdfx <- ecdf(b)
       2 * abs(0.5 - ecdfx(gt))
     })
@@ -33,7 +33,7 @@ rep_kfold_cv_glm <- function(formula, dataset, rep = 5, k = 5) {
     c(
       rmse = yardstick::rmse_vec(truths, poi_modes),
       mae = yardstick::mae_vec(truths, poi_modes),
-      mean_cis = cred_ints |> unlist() |> mean()
+      mean_pis = pred_ints |> unlist() |> mean()
       # mean_prob = mean_prob
       # crps = mean(unlist(crps))
     )
